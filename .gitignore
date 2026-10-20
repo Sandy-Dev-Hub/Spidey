@@ -1,0 +1,24 @@
+# Android / Gradle
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# local.properties (may contain SDK path and API keys)
+local.properties
+
+# Generated files
+**/generated/
+
+# Secrets – never committed
+google-services.json
+keystore.properties
