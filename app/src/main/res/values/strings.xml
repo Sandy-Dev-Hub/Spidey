@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Spidey Spikes</string>
+    <string name="channel_spike_name">Spidey Spike Service</string>
+    <string name="channel_spike_desc">Foreground service notifications for Phase-0 spike tests</string>
+</resources>
