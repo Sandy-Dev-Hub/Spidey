@@ -26,6 +26,7 @@
     <!-- ── Spike 5: Calling ──────────────────────────────────── -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
 
     <application
         android:name=".SpikeApp"

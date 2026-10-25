@@ -28,7 +28,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.spidey.spikes.util.SpikeLogger
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.telephony.SubscriptionManager
 import kotlinx.coroutines.launch
 
 /**
@@ -40,7 +42,7 @@ import kotlinx.coroutines.launch
  *   Button A  "Call via ACTION_CALL"   – system dialer handles everything
  *   Button B  "Call via TelecomManager" – direct SIM selection
  *
- * READ_PHONE_STATE is needed to list phone accounts.
+ * READ_PHONE_STATE and READ_PHONE_NUMBERS are needed to list phone accounts.
  * CALL_PHONE is needed for both routes.
  *
  * Phase 0 only.
@@ -59,11 +61,21 @@ fun CallSpikeScreen() {
         mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_PHONE_STATE)
             == PackageManager.PERMISSION_GRANTED)
     }
+    var hasNumbersPerm by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_PHONE_NUMBERS) == PackageManager.PERMISSION_GRANTED
+            } else true
+        )
+    }
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
         hasCallPerm = grants[Manifest.permission.CALL_PHONE] == true
         hasStatePerm = grants[Manifest.permission.READ_PHONE_STATE] == true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            hasNumbersPerm = grants[Manifest.permission.READ_PHONE_NUMBERS] == true
+        }
     }
 
     var phoneNumber by remember { mutableStateOf("") }
@@ -82,11 +94,33 @@ fun CallSpikeScreen() {
         if (!hasStatePerm) { addLog("READ_PHONE_STATE not granted"); return }
         try {
             val tm = ctx.getSystemService(TelecomManager::class.java)
+            val sm = ctx.getSystemService(SubscriptionManager::class.java)
+
+            // Collect carrier names from SubscriptionManager
+            val carrierBySlot = mutableMapOf<Int, String>()
+            val carrierBySubId = mutableMapOf<String, String>()
+            try {
+                sm?.activeSubscriptionInfoList?.forEach { sub ->
+                    val carrier = sub.displayName?.toString()
+                        ?: sub.carrierName?.toString()
+                        ?: "SIM ${sub.simSlotIndex + 1}"
+                    carrierBySlot[sub.simSlotIndex] = carrier
+                    carrierBySubId[sub.subscriptionId.toString()] = carrier
+                    carrierBySubId[sub.iccId ?: ""] = carrier
+                }
+            } catch (e: Exception) {
+                addLog("SubscriptionManager error: ${e.message}")
+            }
+
             val list = tm.callCapablePhoneAccounts
             accounts = list.mapIndexed { i, handle ->
                 val account: PhoneAccount? = tm.getPhoneAccount(handle)
-                val label = account?.label?.toString() ?: "Account $i"
-                label to handle
+                val labelFromAccount = account?.label?.toString()
+                val carrier = carrierBySubId[handle.id]
+                    ?: carrierBySlot[i]
+                    ?: labelFromAccount
+                    ?: "SIM ${i + 1}"
+                carrier to handle
             }
             addLog("Found ${accounts.size} phone account(s): ${accounts.map { it.first }}")
         } catch (e: SecurityException) {
@@ -94,7 +128,9 @@ fun CallSpikeScreen() {
         }
     }
 
-    LaunchedEffect(hasStatePerm) { if (hasStatePerm) loadAccounts() }
+    LaunchedEffect(hasStatePerm, hasNumbersPerm) {
+        if (hasStatePerm) loadAccounts()
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Spike 5 – Test Call") }) }
@@ -104,8 +140,9 @@ fun CallSpikeScreen() {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // ── Permissions ─────────────────────────────────────────────
+            val allPermsGranted = hasCallPerm && hasStatePerm && hasNumbersPerm
             Card(colors = CardDefaults.cardColors(
-                containerColor = if (hasCallPerm && hasStatePerm)
+                containerColor = if (allPermsGranted)
                     MaterialTheme.colorScheme.primaryContainer
                 else MaterialTheme.colorScheme.errorContainer)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -113,11 +150,18 @@ fun CallSpikeScreen() {
                         style = MaterialTheme.typography.bodySmall)
                     Text("READ_PHONE_STATE: ${if (hasStatePerm) "✅" else "❌"}",
                         style = MaterialTheme.typography.bodySmall)
-                    if (!hasCallPerm || !hasStatePerm) {
+                    Text("READ_PHONE_NUMBERS: ${if (hasNumbersPerm) "✅" else "❌"}",
+                        style = MaterialTheme.typography.bodySmall)
+                    if (!allPermsGranted) {
                         Button(onClick = {
-                            permLauncher.launch(arrayOf(
+                            val permsToRequest = mutableListOf(
                                 Manifest.permission.CALL_PHONE,
-                                Manifest.permission.READ_PHONE_STATE))
+                                Manifest.permission.READ_PHONE_STATE
+                            )
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                permsToRequest.add(Manifest.permission.READ_PHONE_NUMBERS)
+                            }
+                            permLauncher.launch(permsToRequest.toTypedArray())
                         }) { Text("Grant Permissions") }
                     }
                 }

@@ -157,17 +157,55 @@ class SpikeForegroundService : Service() {
         val isScreenOn = pm.isInteractive
         SpikeLogger.log("SPIKE4", "Before unlock: locked=$isLocked screenOn=$isScreenOn")
 
-        // Start the transparent helper activity that shows over the lock screen
-        // and calls requestDismissKeyguard on its window.
+        // 1. Physically turn the screen on using WakeLock
+        try {
+            @Suppress("DEPRECATION")
+            val screenWakeLock = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+                "spidey:unlock_spike_screen"
+            )
+            screenWakeLock.acquire(5000L)
+            SpikeLogger.log("SPIKE4", "Acquired screen-bright wake lock (5s)")
+        } catch (e: Exception) {
+            SpikeLogger.log("SPIKE4", "WakeLock error: ${e.message}")
+        }
+
         val helperIntent = Intent(this, com.spidey.spikes.spike4.UnlockHelperActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        startActivity(helperIntent)
-        SpikeLogger.log("SPIKE4", "UnlockHelperActivity started")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+
+        // 2. Direct startActivity attempt
+        try {
+            startActivity(helperIntent)
+            SpikeLogger.log("SPIKE4", "startActivity(UnlockHelperActivity) called")
+        } catch (e: Exception) {
+            SpikeLogger.log("SPIKE4", "startActivity failed: ${e.message}")
+        }
+
+        // 3. High-priority Full-Screen Intent notification (ensures display over keyguard on Android 14/15)
+        try {
+            val pendingIntent = PendingIntent.getActivity(
+                this, 401, helperIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notif = NotificationCompat.Builder(this, SpikeApp.CHANNEL_SPIKE_ID)
+                .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
+                .setContentTitle("Spidey – Unlock Prompt")
+                .setContentText("Tap or authenticate to unlock")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setFullScreenIntent(pendingIntent, true)
+                .setAutoCancel(true)
+                .build()
+            getSystemService(NotificationManager::class.java).notify(NOTIF_ID_RESULT, notif)
+            SpikeLogger.log("SPIKE4", "FullScreenIntent notification posted")
+        } catch (e: Exception) {
+            SpikeLogger.log("SPIKE4", "Notification post failed: ${e.message}")
+        }
 
         broadcast(ACTION_SPIKE4_RESULT, EXTRA_LOG,
-            "UnlockHelperActivity started | locked=$isLocked screenOn=$isScreenOn")
-        updateNotification("Spike 4: done – check screen")
-        stopSelf()
+            "Unlock requested | locked=$isLocked screenOn=$isScreenOn")
+        updateNotification("Spike 4: Waiting for unlock prompt…")
+        // Don't stopSelf immediately – let UnlockHelperActivity finish and stop the service
     }
 
     // ── Spike 6: Screen-off stability ─────────────────────────────────

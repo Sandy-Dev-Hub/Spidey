@@ -5,6 +5,8 @@ import android.app.KeyguardManager
 import android.os.Bundle
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import android.content.Intent
+import android.os.Build
+import android.view.WindowManager
 import com.spidey.spikes.service.SpikeForegroundService
 import com.spidey.spikes.util.SpikeLogger
 
@@ -18,18 +20,39 @@ import com.spidey.spikes.util.SpikeLogger
  */
 class UnlockHelperActivity : Activity() {
 
+    private var hasPrompted = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Tell the window to show over the lock screen and turn on the screen
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
+        // Show over lock screen and turn screen on
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+        @Suppress("DEPRECATION")
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+    }
+
+    override fun onResume() {
+        super.onResume()
+        promptDismissKeyguard()
+    }
+
+    private fun promptDismissKeyguard() {
+        if (hasPrompted) return
+        hasPrompted = true
 
         val km = getSystemService(KeyguardManager::class.java)
 
         if (!km.isKeyguardLocked) {
             SpikeLogger.log("SPIKE4", "UnlockHelper: keyguard not locked – nothing to dismiss")
             broadcast("keyguard was NOT locked when UnlockHelper ran")
+            stopService(SpikeForegroundService.intentFor(this, SpikeForegroundService.ACTION_STOP))
             finish()
             return
         }
@@ -38,20 +61,23 @@ class UnlockHelperActivity : Activity() {
 
         km.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
             override fun onDismissSucceeded() {
-                SpikeLogger.log("SPIKE4", "onDismissSucceeded – phone unlocked!")
+                SpikeLogger.log("SPIKE4", "PASS: onDismissSucceeded – phone unlocked!")
                 broadcast("PASS: onDismissSucceeded fired – phone unlocked")
+                stopService(SpikeForegroundService.intentFor(this@UnlockHelperActivity, SpikeForegroundService.ACTION_STOP))
                 finish()
             }
 
             override fun onDismissError() {
-                SpikeLogger.log("SPIKE4", "onDismissError – biometric/PIN failed or cancelled")
-                broadcast("FAIL: onDismissError – biometric or PIN failed/cancelled")
+                SpikeLogger.log("SPIKE4", "FAIL: onDismissError – biometric/PIN failed")
+                broadcast("FAIL: onDismissError – biometric or PIN failed")
+                stopService(SpikeForegroundService.intentFor(this@UnlockHelperActivity, SpikeForegroundService.ACTION_STOP))
                 finish()
             }
 
             override fun onDismissCancelled() {
-                SpikeLogger.log("SPIKE4", "onDismissCancelled – user cancelled or no lock set")
-                broadcast("INFO: onDismissCancelled – no secure lock or user dismissed")
+                SpikeLogger.log("SPIKE4", "INFO: onDismissCancelled – user cancelled prompt")
+                broadcast("INFO: onDismissCancelled – user cancelled prompt")
+                stopService(SpikeForegroundService.intentFor(this@UnlockHelperActivity, SpikeForegroundService.ACTION_STOP))
                 finish()
             }
         })
