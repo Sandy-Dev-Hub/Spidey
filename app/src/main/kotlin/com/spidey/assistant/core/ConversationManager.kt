@@ -42,6 +42,7 @@ class ConversationManager(
 
     private var emptySpeechAttempts = 0
     private var pendingActionAfterUnlock: AssistantAction? = null
+    private var activeClarificationCandidates: List<String> = emptyList()
 
     /**
      * Called when the wake word is detected ("Hey Spider" / "Spider").
@@ -93,7 +94,10 @@ class ConversationManager(
 
                 _state.value = AssistantState.PROCESSING
 
-                val action = intentEngine.parse(trimmed)
+                val candidates = activeClarificationCandidates
+                activeClarificationCandidates = emptyList()
+
+                val action = intentEngine.parse(trimmed, candidates)
                 if (action != null) {
                     executeAction(action)
                 } else {
@@ -187,6 +191,7 @@ class ConversationManager(
                 }
             }
             is ActionResult.NeedsClarification -> {
+                activeClarificationCandidates = result.candidates
                 speakResponse(result.question) {
                     // Re-enter listening for the user's answer
                     _state.value = AssistantState.LISTENING
@@ -227,6 +232,7 @@ class ConversationManager(
     }
 
     private fun returnToSleeping() {
+        activeClarificationCandidates = emptyList()
         _state.value = AssistantState.SLEEPING
         // Re-arm wake word spotter
         onWakeWordStateRequested(true)

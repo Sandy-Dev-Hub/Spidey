@@ -73,7 +73,8 @@ import com.spidey.assistant.voice.WakeWordService
 
 @Composable
 fun HomeScreen(
-    onNavigateToSpikes: () -> Unit = {}
+    onNavigateToSpikes: () -> Unit = {},
+    onNavigateToAliases: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isServiceRunning by WakeWordService.isServiceRunning.collectAsState()
@@ -91,6 +92,13 @@ fun HomeScreen(
         )
     }
 
+    var hasContactsPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
+                    PackageManager.PERMISSION_GRANTED
+        )
+    }
+
     var hasNotificationPermission by remember {
         mutableStateOf(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -103,6 +111,10 @@ fun HomeScreen(
     val micPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted -> hasMicPermission = granted }
+
+    val contactsPermLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted -> hasContactsPermission = granted }
 
     val notifPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -136,19 +148,28 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Voice Foundation • Phase 1",
+                        text = "Voice & Contacts • Phase 2",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
-                OutlinedButton(
-                    onClick = onNavigateToSpikes,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Science, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Spikes", fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick = onNavigateToAliases,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Aliases", fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = onNavigateToSpikes,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Science, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Spikes", fontSize = 12.sp)
+                    }
                 }
             }
 
@@ -319,6 +340,12 @@ fun HomeScreen(
                         title = "Microphone (RECORD_AUDIO)",
                         isGranted = hasMicPermission,
                         onRequest = { micPermLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+                    )
+
+                    PermissionRow(
+                        title = "Contacts (READ_CONTACTS)",
+                        isGranted = hasContactsPermission,
+                        onRequest = { contactsPermLauncher.launch(Manifest.permission.READ_CONTACTS) }
                     )
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

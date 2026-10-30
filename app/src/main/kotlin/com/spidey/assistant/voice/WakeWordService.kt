@@ -12,12 +12,16 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.spidey.assistant.actions.FindContactHandler
 import com.spidey.assistant.actions.GreetingHandler
 import com.spidey.assistant.actions.OpenAppHandler
+import com.spidey.assistant.contacts.ContactRepository
 import com.spidey.assistant.core.ActionRouter
 import com.spidey.assistant.core.AssistantState
 import com.spidey.assistant.core.ConversationManager
 import com.spidey.assistant.core.IntentEngine
+import com.spidey.assistant.data.SpideyDatabase
+import com.spidey.assistant.safety.PermissionManager
 import com.spidey.assistant.unlock.UnlockCoordinator
 import com.spidey.spikes.MainActivity
 import com.spidey.spikes.R
@@ -49,9 +53,17 @@ class WakeWordService : Service() {
         Log.d(TAG, "Creating WakeWordService")
         createNotificationChannel()
 
+        val db = SpideyDatabase.getInstance(this)
+        val contactRepository = ContactRepository(
+            context = this,
+            permissionManager = PermissionManager(this),
+            aliasDao = db.aliasDao()
+        )
+
         actionRouter = ActionRouter().apply {
             register(GreetingHandler())
             register(OpenAppHandler(this@WakeWordService))
+            register(FindContactHandler(contactRepository))
         }
 
         intentEngine = IntentEngine()

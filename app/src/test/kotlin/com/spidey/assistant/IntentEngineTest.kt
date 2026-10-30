@@ -1,6 +1,7 @@
 package com.spidey.assistant
 
 import com.spidey.assistant.actions.AllowedApp
+import com.spidey.assistant.actions.FindContactAction
 import com.spidey.assistant.actions.GreetingAction
 import com.spidey.assistant.actions.OpenAppAction
 import com.spidey.assistant.core.IntentEngine
@@ -61,6 +62,45 @@ class IntentEngineTest {
     }
 
     @Test
+    fun testContactSearchIntents() {
+        val queries = mapOf(
+            "find Guru Anna" to "guru anna",
+            "who is Guru Krishnan" to "guru krishnan",
+            "search contact Mom" to "mom",
+            "search for contact Dad" to "dad",
+            "lookup Anna" to "anna",
+            "contact details for John" to "john",
+            "call Brother" to "brother"
+        )
+
+        for ((phrase, expectedQuery) in queries) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' should produce FindContactAction", action is FindContactAction)
+            assertEquals(expectedQuery, (action as FindContactAction).query)
+        }
+    }
+
+    @Test
+    fun testClarificationResolution() {
+        val candidates = listOf("Guru Anna LW", "Guru Anna LiveWires", "Guru Krishnan")
+
+        // Ordinal responses
+        val firstResult = intentEngine.parse("the first one", candidates)
+        assertTrue(firstResult is FindContactAction)
+        assertEquals("Guru Anna LW", (firstResult as FindContactAction).query)
+
+        val secondResult = intentEngine.parse("second", candidates)
+        assertTrue(secondResult is FindContactAction)
+        assertEquals("Guru Anna LiveWires", (secondResult as FindContactAction).query)
+
+        // Substring responses
+        val nameResult = intentEngine.parse("LiveWires", candidates)
+        assertTrue(nameResult is FindContactAction)
+        assertEquals("Guru Anna LiveWires", (nameResult as FindContactAction).query)
+    }
+
+    @Test
     fun testUnrecognizedOrGibberishIntentsReturnNull() {
         val unknownPhrases = listOf(
             "",
@@ -73,7 +113,7 @@ class IntentEngineTest {
 
         for (phrase in unknownPhrases) {
             val action = intentEngine.parse(phrase)
-            assertNull("Phrase '$phrase' should return null in Phase 1 intent engine", action)
+            assertNull("Phrase '$phrase' should return null", action)
         }
     }
 }
