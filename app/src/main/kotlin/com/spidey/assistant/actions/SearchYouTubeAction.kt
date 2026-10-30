@@ -40,18 +40,22 @@ class SearchYouTubeHandler(
         }
 
         return try {
-            val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
-            val webUri = Uri.parse("https://www.youtube.com/results?search_query=$encoded")
-            val intent = Intent(Intent.ACTION_VIEW, webUri).apply {
+            val intent = Intent(Intent.ACTION_SEARCH).apply {
                 setPackage("com.google.android.youtube")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                putExtra("query", cleanQuery)
+                putExtra(android.app.SearchManager.QUERY, cleanQuery)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             try {
                 context.startActivity(intent)
             } catch (_: Exception) {
                 // If native YouTube app package is not available, open in default browser
-                intent.setPackage(null)
-                context.startActivity(intent)
+                val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
+                val webUri = Uri.parse("https://www.youtube.com/results?search_query=$encoded")
+                val webIntent = Intent(Intent.ACTION_VIEW, webUri).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(webIntent)
             }
             ActionResult.Success(spokenMessage = "Searching $cleanQuery on YouTube.")
         } catch (e: Exception) {
