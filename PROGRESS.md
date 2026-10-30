@@ -1,17 +1,38 @@
 # SPIDEY - Progress Tracker
 
-## Current Phase: Phase 2 - Contact Search
+## Current Phase: Phase 3 - Calling and SIM Selection
 
 | Phase | Status | Branch | Tag |
 |-------|--------|--------|-----|
 | Phase 0 - Feasibility | **DONE** | `main` | `phase-0-done` |
 | Phase 1 - Voice Foundation | **DONE** | `main` | `phase-1-done` |
-| Phase 2 - Contact Search | **VERIFIED ON DEVICE** | `phase-2-contacts` | `phase-2-done` |
-| Phase 3 - Calling and SIM | NEXT UP | `phase-3-calling` | - |
-| Phase 4 - AI Understanding | WAITING | - | - |
+| Phase 2 - Contact Search | **DONE** | `main` | `phase-2-done` |
+| Phase 3 - Calling and SIM | **VERIFIED ON DEVICE** | `phase-3-calling` | `phase-3-done` |
+| Phase 4 - AI Understanding | NEXT UP | - | - |
 | Phase 5 - Multi-App Actions | WAITING | - | - |
 | Phase 6 - Background Reliability | WAITING | - | - |
 | Phase 7 - Security and Release | WAITING | - | - |
+
+---
+
+## Phase 3 - Calling and SIM Selection
+
+**Goal:** "Call Guru Anna" resolves the contact, picks a number, asks for the SIM if needed, confirms, and starts the call through a supported flow. It reports honestly what happened.
+
+**Started:** 2026-10-30  
+**Completed:** 2026-10-30  
+
+### Implementation Deliverables
+- [x] **CallingAccountRepository:** Discovers live SIM and phone accounts via Android Telecom and Subscription APIs without assuming static SIM slots.
+- [x] **ConfirmationPolicy:** Evaluates spoken confirmation ("yes", "go ahead", "sure", etc.) and cancellation ("no", "cancel", "stop", etc.) and formats prompt.
+- [x] **CallCoordinator:** Places direct calls with `TelecomManager.placeCall()` passing `EXTRA_PHONE_ACCOUNT_HANDLE`, with `ACTION_CALL` and `ACTION_DIAL` (dialer fallback).
+- [x] **CallContactAction & CallActionHandler:** Complete multi-turn calling handler with contact resolution, multiple number disambiguation, dual SIM selection, spoken confirmation, and dialer fallback.
+- [x] **Locked Device Handling & In-Memory Resume:** Re-validates keyguard lock status, requests system unlock via `UnlockActivity`, and tracks pending actions in-memory with a 30s TTL.
+- [x] **IntentEngine Calling Expansion:** Rules for natural speech calling ("call [name]", "call [name] on [sim]", "dial [name]"), number choices, SIM choices, and spoken confirmations.
+- [x] **Service Integration:** Registered `CallActionHandler` in `WakeWordService`.
+- [x] **Unit Tests:** 40/40 tests passing across `CallActionHandlerTest`, `CallingAccountRepositoryTest`, `ConfirmationPolicyTest`, and `IntentEngineTest`.
+- [x] **Phone Verification:** Deployed and running on Samsung Galaxy A14 5G.
+
 
 ---
 
