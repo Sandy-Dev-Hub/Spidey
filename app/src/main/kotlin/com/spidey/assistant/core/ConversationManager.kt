@@ -1,6 +1,7 @@
 package com.spidey.assistant.core
 
 import com.spidey.assistant.actions.AssistantAction
+import com.spidey.assistant.actions.StopAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,7 +25,8 @@ class ConversationManager(
     private val onWakeWordStateRequested: (enable: Boolean) -> Unit = {},
     private val onStartSpeechListeningRequested: () -> Unit = {},
     private val onStopSpeechListeningRequested: () -> Unit = {},
-    private val onUnlockRequested: (pendingAction: AssistantAction) -> Unit = {}
+    private val onUnlockRequested: (pendingAction: AssistantAction) -> Unit = {},
+    private val followUpTimeoutMs: Long = 0L
 ) {
     private val mutex = Mutex()
 
@@ -44,17 +46,47 @@ class ConversationManager(
     private var pendingActionAfterUnlock: AssistantAction? = null
     private var activeClarificationCandidates: List<String> = emptyList()
 
+    private var isSessionActive = false
+    private var sessionTimeoutJob: Job? = null
+
+    private fun resetSessionTimeout() {
+        if (followUpTimeoutMs <= 0L) return
+        sessionTimeoutJob?.cancel()
+        sessionTimeoutJob = scope.launch {
+            kotlinx.coroutines.delay(followUpTimeoutMs)
+            mutex.withLock {
+                if (isSessionActive) {
+                    endSessionAndSleep()
+                }
+            }
+        }
+    }
+
+    private fun endSessionAndSleep() {
+        isSessionActive = false
+        sessionTimeoutJob?.cancel()
+        sessionTimeoutJob = null
+        onStopSpeechListeningRequested()
+        returnToSleeping()
+    }
+
     /**
      * Called when the wake word is detected ("Hey Spider" / "Spider").
      */
     fun onWakeWordDetected() {
         scope.launch {
             mutex.withLock {
-                if (_state.value == AssistantState.LISTENING ||
-                    _state.value == AssistantState.PROCESSING ||
+                if (_state.value == AssistantState.PROCESSING ||
                     _state.value == AssistantState.SPEAKING
                 ) {
                     return@withLock
+                }
+
+                if (followUpTimeoutMs > 0L) {
+                    isSessionActive = true
+                    resetSessionTimeout()
+                } else {
+                    isSessionActive = false
                 }
 
                 emptySpeechAttempts = 0
@@ -92,6 +124,7 @@ class ConversationManager(
                     return@withLock
                 }
 
+                resetSessionTimeout()
                 _state.value = AssistantState.PROCESSING
 
                 val candidates = activeClarificationCandidates
@@ -103,7 +136,13 @@ class ConversationManager(
                 } else {
                     speakResponse(
                         text = "I didn't understand that.",
-                        andThen = { returnToSleeping() }
+                        andThen = {
+                            if (isSessionActive) {
+                                enterFollowUpListening()
+                            } else {
+                                returnToSleeping()
+                            }
+                        }
                     )
                 }
             }
@@ -117,7 +156,19 @@ class ConversationManager(
         scope.launch {
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
-                handleEmptySpeech()
+                if (isSessionActive) {
+                    // In continuous conversation window: seamlessly re-arm speech recognition
+                    scope.launch {
+                        kotlinx.coroutines.delay(250)
+                        mutex.withLock {
+                            if (isSessionActive && _state.value == AssistantState.LISTENING) {
+                                onStartSpeechListeningRequested()
+                            }
+                        }
+                    }
+                } else {
+                    handleEmptySpeech()
+                }
             }
         }
     }
@@ -130,19 +181,27 @@ class ConversationManager(
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
 
-                // Transient / silence / timeout error codes:
-                // 1 = ERROR_NETWORK_TIMEOUT, 2 = ERROR_NETWORK, 3 = ERROR_AUDIO,
-                // 5 = ERROR_CLIENT, 6 = ERROR_SPEECH_TIMEOUT, 7 = ERROR_NO_MATCH,
-                // 8 = ERROR_RECOGNIZER_BUSY, 11 = ERROR_SERVER_DISCONNECTED
                 val isTransientOrSilence = errorCode in setOf(1, 2, 3, 5, 6, 7, 8, 11)
 
-                if (isTransientOrSilence && emptySpeechAttempts == 0) {
-                    handleEmptySpeech()
-                } else {
-                    if (!isTransientOrSilence) {
-                        _errorText.value = "Speech recognition error: $errorMessage ($errorCode)"
+                if (isSessionActive) {
+                    // Seamlessly re-arm speech recognition in follow-up mode
+                    scope.launch {
+                        kotlinx.coroutines.delay(350)
+                        mutex.withLock {
+                            if (isSessionActive && _state.value == AssistantState.LISTENING) {
+                                onStartSpeechListeningRequested()
+                            }
+                        }
                     }
-                    returnToSleeping()
+                } else {
+                    if (isTransientOrSilence && emptySpeechAttempts == 0) {
+                        handleEmptySpeech()
+                    } else {
+                        if (!isTransientOrSilence) {
+                            _errorText.value = "Speech recognition error: $errorMessage ($errorCode)"
+                        }
+                        returnToSleeping()
+                    }
                 }
             }
         }
@@ -170,8 +229,7 @@ class ConversationManager(
         scope.launch {
             mutex.withLock {
                 pendingActionAfterUnlock = null
-                onStopSpeechListeningRequested()
-                returnToSleeping()
+                endSessionAndSleep()
             }
         }
     }
@@ -181,7 +239,13 @@ class ConversationManager(
         when (val result = actionRouter.route(action)) {
             is ActionResult.Success -> {
                 speakResponse(result.spokenMessage) {
-                    returnToSleeping()
+                    if (action is StopAction) {
+                        endSessionAndSleep()
+                    } else if (isSessionActive) {
+                        enterFollowUpListening()
+                    } else {
+                        returnToSleeping()
+                    }
                 }
             }
             is ActionResult.NeedsUnlock -> {
@@ -194,7 +258,11 @@ class ConversationManager(
             is ActionResult.Failure -> {
                 _errorText.value = result.reason
                 speakResponse(result.spokenMessage) {
-                    returnToSleeping()
+                    if (isSessionActive) {
+                        enterFollowUpListening()
+                    } else {
+                        returnToSleeping()
+                    }
                 }
             }
             is ActionResult.NeedsClarification -> {
@@ -206,7 +274,21 @@ class ConversationManager(
                 }
             }
             is ActionResult.Cancelled -> {
-                returnToSleeping()
+                endSessionAndSleep()
+            }
+        }
+    }
+
+    private fun enterFollowUpListening() {
+        emptySpeechAttempts = 0
+        _state.value = AssistantState.LISTENING
+        onWakeWordStateRequested(false)
+        scope.launch {
+            kotlinx.coroutines.delay(200)
+            mutex.withLock {
+                if (isSessionActive && _state.value == AssistantState.LISTENING) {
+                    onStartSpeechListeningRequested()
+                }
             }
         }
     }

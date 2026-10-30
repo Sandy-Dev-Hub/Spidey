@@ -53,6 +53,7 @@ class SpeechRecognizerManager(
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN")
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 }
 
                 hasSpeechStarted = false
@@ -137,7 +138,12 @@ class SpeechRecognizerManager(
             val errorMsg = mapErrorCode(error)
             Log.w(TAG, "SpeechRecognizer onError: $error ($errorMsg)")
 
-            if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+            // Codes 6 (ERROR_SPEECH_TIMEOUT), 7 (ERROR_NO_MATCH), 11 (ERROR_SERVER_DISCONNECTED)
+            // are idle/silence timeouts that should trigger follow-up or re-listen rather than fatal errors.
+            if (error == SpeechRecognizer.ERROR_NO_MATCH ||
+                error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
+                error == 11
+            ) {
                 onEmpty()
             } else {
                 onError(error, errorMsg)

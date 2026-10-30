@@ -123,20 +123,33 @@ class WakeWordEngine(
         recognizer = null
     }
 
+    private fun isWakeWordMatch(raw: String): Boolean {
+        val clean = raw.lowercase().replace(Regex("[^a-z0-9 ]"), " ")
+        val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+
+        val wakeKeywords = setOf(
+            "spider", "spidey", "spidy", "spyder", "spydar", "spida", "speeder"
+        )
+
+        if (words.any { it in wakeKeywords }) return true
+        if (clean.contains("spider") || clean.contains("spidey") || clean.contains("spyder") ||
+            clean.contains("spy der") || clean.contains("spy the") || clean.contains("hey speeder")
+        ) {
+            return true
+        }
+        return false
+    }
+
     private fun createListener(rec: Recognizer) = object : RecognitionListener {
         override fun onPartialResult(hypothesis: String?) {
             if (hypothesis.isNullOrBlank() || isPaused) return
             try {
                 val json = JSONObject(hypothesis)
                 val partial = json.optString("partial", "").trim()
-                if (partial.isNotBlank()) {
-                    if (partial.contains("spidey", ignoreCase = true) ||
-                        partial.contains("spider", ignoreCase = true)
-                    ) {
-                        Log.d(TAG, "Wake word spotted in partial: \"$partial\"")
-                        rec.reset()
-                        onWakeWordDetected()
-                    }
+                if (partial.isNotBlank() && isWakeWordMatch(partial)) {
+                    Log.d(TAG, "Wake word spotted in partial: \"$partial\"")
+                    rec.reset()
+                    onWakeWordDetected()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error parsing partial: ${e.message}")
@@ -148,21 +161,30 @@ class WakeWordEngine(
             try {
                 val json = JSONObject(hypothesis)
                 val text = json.optString("text", "").trim()
-                if (text.isNotBlank()) {
-                    if (text.contains("spidey", ignoreCase = true) ||
-                        text.contains("spider", ignoreCase = true)
-                    ) {
-                        Log.d(TAG, "Wake word spotted in result: \"$text\"")
-                        rec.reset()
-                        onWakeWordDetected()
-                    }
+                if (text.isNotBlank() && isWakeWordMatch(text)) {
+                    Log.d(TAG, "Wake word spotted in result: \"$text\"")
+                    rec.reset()
+                    onWakeWordDetected()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error parsing result: ${e.message}")
             }
         }
 
-        override fun onFinalResult(hypothesis: String?) {}
+        override fun onFinalResult(hypothesis: String?) {
+            if (hypothesis.isNullOrBlank() || isPaused) return
+            try {
+                val json = JSONObject(hypothesis)
+                val text = json.optString("text", "").trim()
+                if (text.isNotBlank() && isWakeWordMatch(text)) {
+                    Log.d(TAG, "Wake word spotted in finalResult: \"$text\"")
+                    rec.reset()
+                    onWakeWordDetected()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error parsing finalResult: ${e.message}")
+            }
+        }
 
         override fun onError(exception: java.lang.Exception?) {
             Log.w(TAG, "Vosk RecognitionListener error: ${exception?.message}")

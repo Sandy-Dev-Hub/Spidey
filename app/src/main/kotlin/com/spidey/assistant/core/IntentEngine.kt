@@ -7,6 +7,7 @@ import com.spidey.assistant.actions.FindContactAction
 import com.spidey.assistant.actions.GreetingAction
 import com.spidey.assistant.actions.OpenAppAction
 import com.spidey.assistant.actions.SearchYouTubeAction
+import com.spidey.assistant.actions.StopAction
 import com.spidey.assistant.calling.CallSessionManager
 import com.spidey.assistant.safety.ConfirmationPolicy
 
@@ -28,7 +29,12 @@ class IntentEngine {
             }
         }
 
-        // 2. Check for Greeting intent
+        // 2. Check for explicit Stop / Sleep commands (e.g. "stop", "sleep", "bye", "cancel")
+        if (isStopCommand(normalized)) {
+            return StopAction()
+        }
+
+        // 3. Check for Greeting intent
         if (isGreeting(normalized)) {
             return GreetingAction(queryText = text)
         }
@@ -122,6 +128,15 @@ class IntentEngine {
         return null
     }
 
+    private fun isStopCommand(text: String): Boolean {
+        val clean = text.replace(Regex("[^a-z0-9 ]"), "").trim()
+        val stopPhrases = setOf(
+            "stop", "cancel", "bye", "goodbye", "sleep", "shut down", "go to sleep",
+            "exit", "close", "turn off", "quit", "stop listening", "stop assistant"
+        )
+        return clean in stopPhrases
+    }
+
     private fun isGreeting(text: String): Boolean {
         val clean = text.replace(Regex("[^a-z0-9 ]"), "").trim()
         val exactMatches = setOf(
@@ -147,15 +162,39 @@ class IntentEngine {
     private fun matchYouTubeSearch(text: String): AssistantAction? {
         val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
 
-        // 1. Explicit YouTube search patterns
-        // e.g. "go to search bar and search song ... on youtube"
-        // e.g. "search song on youtube", "play ... on youtube"
+        // 1. Explicit YouTube search patterns including compound "open youtube and search..."
         val explicitPrefixes = listOf(
+            "open youtube and search for song",
+            "open youtube and search for the song",
+            "open youtube and search song",
+            "open youtube and search for video",
+            "open youtube and search for movie",
+            "open youtube and search for",
+            "open youtube and search",
+            "open youtube and play song",
+            "open youtube and play",
+            "open youtube and find",
+            "open youtube search for song",
+            "open youtube search for",
+            "open youtube search",
+            "open youtube play",
+            "go to search bar and search for song",
+            "go to search bar and search for the song",
             "go to search bar and search for",
+            "go to search bar and search song",
             "go to search bar and search",
+            "search bar and search for",
             "search bar and search",
             "search for song",
+            "search for the song",
             "search song",
+            "search for video",
+            "search video",
+            "search for movie",
+            "search movie",
+            "search for music",
+            "search music",
+            "search for track",
             "search on youtube for",
             "search on youtube",
             "search in youtube for",
@@ -164,6 +203,12 @@ class IntentEngine {
             "search youtube",
             "play on youtube",
             "play in youtube",
+            "play song",
+            "play the song",
+            "play movie",
+            "play video",
+            "play music",
+            "play track",
             "in youtube search for",
             "in youtube search"
         )
@@ -193,7 +238,30 @@ class IntentEngine {
             }
         }
 
-        // 3. "play [song/artist]" intent (e.g. "play some song", "play believer")
+        // 3. Media-specific keywords with search/find verbs (e.g. "search for song magale from baththa movie", "find song ...")
+        val mediaKeywords = setOf("song", "songs", "movie", "movies", "video", "videos", "music", "track")
+        val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+        if (words.any { it in mediaKeywords }) {
+            val searchTriggers = listOf("search for", "search", "find", "look for", "listen to")
+            for (trigger in searchTriggers) {
+                if (clean.startsWith("$trigger ")) {
+                    var candidate = clean.removePrefix("$trigger ").trim()
+                    // Strip optional leading descriptor word (e.g. "song magale..." -> "magale...", "the song...")
+                    val stripLeading = listOf("the song ", "song ", "the movie ", "movie ", "the video ", "video ", "the music ", "music ", "the track ", "track ")
+                    for (descriptor in stripLeading) {
+                        if (candidate.startsWith(descriptor)) {
+                            candidate = candidate.removePrefix(descriptor).trim()
+                            break
+                        }
+                    }
+                    if (candidate.isNotBlank()) {
+                        return SearchYouTubeAction(query = candidate)
+                    }
+                }
+            }
+        }
+
+        // 4. "play [song/artist]" intent (e.g. "play some song", "play believer")
         if (clean.startsWith("play ") && clean != "play youtube") {
             val query = clean.removePrefix("play ").trim()
             if (query.isNotBlank()) {
@@ -298,7 +366,14 @@ class IntentEngine {
     }
 
     private fun matchContactSearch(text: String): AssistantAction? {
-        val clean = text.replace(Regex("[^a-z0-9 ]"), " ").trim()
+        val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+
+        // Guard: If text mentions songs, movies, videos, music, or youtube, it is NEVER a contact lookup!
+        val mediaKeywords = setOf("song", "songs", "movie", "movies", "video", "videos", "music", "youtube", "track", "album")
+        val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+        if (words.any { it in mediaKeywords }) {
+            return null
+        }
 
         val prefixes = listOf(
             "search for contact",
