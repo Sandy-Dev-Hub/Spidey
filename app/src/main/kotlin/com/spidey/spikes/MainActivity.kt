@@ -22,6 +22,8 @@ import com.spidey.spikes.spike5.CallSpikeScreen
 import com.spidey.spikes.spike6.ScreenOffSpikeScreen
 import com.spidey.spikes.util.SpikeLogger
 
+import com.spidey.assistant.ui.home.HomeScreen
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,7 +39,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    SpikeNavGraph()
+                    SpideyNavGraph()
                 }
             }
         }
@@ -45,9 +47,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun SpikeNavGraph() {
+fun SpideyNavGraph() {
     val nav = rememberNavController()
-    NavHost(navController = nav, startDestination = "menu") {
+    NavHost(navController = nav, startDestination = "home") {
+        composable("home")   { HomeScreen(onNavigateToSpikes = { nav.navigate("menu") }) }
         composable("menu")   { SpikeMenuScreen(nav) }
         composable("spike1") { WakeWordSpikeScreen() }
         composable("spike2") { MicHandoffSpikeScreen() }

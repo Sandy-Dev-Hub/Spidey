@@ -91,6 +91,10 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation("com.alphacephei:vosk-android:0.3.75@aar")
 
+    // ---- Testing ---------------------------------------------------
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+
     // ---- Debug only -------------------------------------------------
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
