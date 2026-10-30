@@ -44,7 +44,7 @@ fun SpikeMenuScreen(nav: NavController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             SpikeCard("Spike 1", "Wake Word",
-                "Porcupine engine stub (AccessKey needed). Measures false wakes.",
+                "Offline Vosk keyword spotter for 'Spidey'. Measures detections and false wakes.",
                 Icons.Default.Mic, MaterialTheme.colorScheme.primary) { nav.navigate("spike1") }
 
             SpikeCard("Spike 2", "Mic Handoff Chain",

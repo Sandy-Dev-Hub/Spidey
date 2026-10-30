@@ -87,9 +87,9 @@ dependencies {
     // ---- LocalBroadcastManager (service → UI updates) ---------------
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
 
-    // ---- Porcupine wake-word SDK ------------------------------------
-    // Uncomment once AccessKey and .ppn keyword file are provided:
-    // implementation("ai.picovoice:porcupine-android:3.0.1")
+    // ---- Vosk Offline Speech Recognition & Keyword Spotting ----------
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
+    implementation("com.alphacephei:vosk-android:0.3.75@aar")
 
     // ---- Debug only -------------------------------------------------
     debugImplementation("androidx.compose.ui:ui-tooling")

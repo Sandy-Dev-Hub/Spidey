@@ -11,7 +11,7 @@
 
 | Spike | Feature | Status | Key Observation / Route Tested |
 |-------|---------|--------|--------------------------------|
-| **Spike 1** | Wake Word | **CONFIRMED** | Primary: Picovoice Porcupine ("Hey Spidey"); Fallback: Vosk offline keyword model. |
+| **Spike 1** | Wake Word | **PASS** | Verified on device with offline Vosk Indian English engine. Trigger phrase: `"Hey Spider"` / `"Spider"`. 100% on-device, zero API keys. |
 | **Spike 2** | Mic Handoff | **PASS** | Ready for speech in **645 ms** from wake word (beep: ~400 ms, SpeechRecognizer startup: ~166 ms). Clean `en-IN` capture. |
 | **Spike 3** | Background Launch | **PASS** (Screen On) / Requires Unlock (Screen Off) | Direct `startActivity` works when screen is on. When locked, Android blocks 3rd-party apps until keyguard is dismissed. |
 | **Spike 4** | Unlock Prompt | **PASS** | Screen turns on reliably via screen-bright WakeLock + Full-Screen Intent; keyguard dismiss/PIN prompt displayed. Unlocked phone opens automatically. |
@@ -42,18 +42,19 @@
   - Total latency to ready: **~645 ms**.
   - `en-IN` SpeechRecognizer handles Indian names ("Guru Anna") accurately with realtime partial results.
 - [x] **Wake Engine & Keyword:**
-  - **Chosen Wake Phrase:** `"Hey Spidey"` (with `"Spidey"` as secondary trigger).
-  - **Primary Engine:** **Picovoice Porcupine** on-device wake-word engine.
-  - **Fallback Engine:** **Vosk Small Model** (offline, Apache 2.0, zero cloud/API key dependency).
+  - **Chosen Wake Phrase:** `"Hey Spider"` (with `"Spider"` as secondary trigger).
+  - **Selected Engine:** **Vosk Indian English Model** (`vosk-model-small-en-in-0.4`, Apache 2.0, completely offline, zero API keys or company email walls).
+  - **Secondary / Future Candidate:** **openWakeWord** custom `.onnx` model if single-word "Spidey" ONNX classifier is trained.
 
 ---
 
 ## Detailed Spike Results
 
 ### Spike 1: Wake Word
-* **Decision:** Primary engine: **Picovoice Porcupine** with keyword model `"Hey Spidey"`. Fallback engine: **Vosk** offline keyword spotter.
-* **Licensing / Constraints:** Porcupine requires personal developer AccessKey. Vosk is open-source (Apache 2.0) with no authentication or internet requirements.
-* **Result:** **CONFIRMED**
+* **Decision:** **Vosk Offline Engine** (`vosk-model-small-en-in-0.4`).
+* **Trigger Phrase:** `"Hey Spider"` / `"Spider"`.
+* **Licensing / Constraints:** Apache 2.0 open-source, runs 100% on-device, no internet, no authentication, no subscription or developer keys required.
+* **Result:** **PASS** — Verified live on Samsung Galaxy A14 5G. Immediate detection upon saying "Hey Spider".
  
 
 ### Spike 2: Mic Handoff Chain

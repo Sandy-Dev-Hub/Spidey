@@ -47,7 +47,7 @@
 
 | Spike | Status | Notes |
 |-------|--------|-------|
-| Spike 1: Wake word | **CONFIRMED** | Primary: Porcupine ("Hey Spidey"); Fallback: Vosk offline keyword model. |
+| Spike 1: Wake word | **PASS** | Vosk Indian English offline model; trigger phrase: "Hey Spider" / "Spider". |
 | Spike 2: Mic handoff | **PASS** | 645 ms total time to ready; accurate `en-IN` capture on Samsung device. |
 | Spike 3: Background app launch | **PASS** | `startActivity` works screen-on; locked screen requires keyguard dismissal flow. |
 | Spike 4: Unlock prompt | **PASS** | WakeLock + FullScreenIntent wakes screen, presents PIN/fingerprint prompt. |
@@ -58,7 +58,7 @@
 
 - [x] docs/PHASE0_RESULTS.md with pass/fail table for all six spikes
 - [x] Written decision: plain foreground service vs. default-assistant role (Decision: Plain foreground service with Unrestricted battery)
-- [x] Chosen wake phrase and engine confirmed (Phrase: "Hey Spidey"; Engine: Porcupine + Vosk fallback)
+- [x] Chosen wake phrase and engine confirmed (Phrase: "Hey Spider" / "Spider"; Engine: Vosk Indian English offline model)
 
 ---
 
