@@ -51,6 +51,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -110,7 +111,18 @@ fun HomeScreen(
 
     val micPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { granted -> hasMicPermission = granted }
+    ) { granted ->
+        hasMicPermission = granted
+        if (granted && !isServiceRunning) {
+            WakeWordService.start(context)
+        }
+    }
+
+    LaunchedEffect(hasMicPermission) {
+        if (hasMicPermission && !isServiceRunning) {
+            WakeWordService.start(context)
+        }
+    }
 
     val contactsPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()

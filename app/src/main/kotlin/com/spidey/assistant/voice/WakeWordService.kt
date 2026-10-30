@@ -12,10 +12,14 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import com.spidey.assistant.actions.CallActionHandler
 import com.spidey.assistant.actions.FindContactHandler
 import com.spidey.assistant.actions.GreetingHandler
 import com.spidey.assistant.actions.OpenAppHandler
+import com.spidey.assistant.actions.SearchYouTubeHandler
 import com.spidey.assistant.calling.CallCoordinator
 import com.spidey.assistant.calling.CallingAccountRepository
 import com.spidey.assistant.contacts.ContactRepository
@@ -67,9 +71,47 @@ class WakeWordService : Service() {
         val callingAccountRepository = CallingAccountRepository(this)
         val callCoordinator = CallCoordinator(this, permManager)
 
+        val audioManager = getSystemService(AudioManager::class.java)
+        var audioFocusRequest: AudioFocusRequest? = null
+
+        fun requestDuckingAudioFocus() {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                        )
+                        .setAcceptsDelayedFocusGain(false)
+                        .setOnAudioFocusChangeListener { /* no-op */ }
+                        .build()
+                    audioFocusRequest = req
+                    audioManager?.requestAudioFocus(req)
+                } else {
+                    @Suppress("DEPRECATION")
+                    audioManager?.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                }
+            } catch (_: Exception) {}
+        }
+
+        fun abandonDuckingAudioFocus() {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    audioFocusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
+                    audioFocusRequest = null
+                } else {
+                    @Suppress("DEPRECATION")
+                    audioManager?.abandonAudioFocus(null)
+                }
+            } catch (_: Exception) {}
+        }
+
         actionRouter = ActionRouter().apply {
             register(GreetingHandler())
             register(OpenAppHandler(this@WakeWordService))
+            register(SearchYouTubeHandler(this@WakeWordService))
             register(FindContactHandler(contactRepository))
             register(CallActionHandler(contactRepository, callingAccountRepository, callCoordinator, permManager))
         }
@@ -89,6 +131,7 @@ class WakeWordService : Service() {
             context = this,
             onWakeWordDetected = {
                 Log.d(TAG, "Wake word triggered!")
+                requestDuckingAudioFocus()
                 conversationManager.onWakeWordDetected()
             },
             onModelLoaded = {
@@ -105,7 +148,13 @@ class WakeWordService : Service() {
             speak = { text, onDone -> speechOutput.speak(text, onDone) },
             playPromptSound = { speechOutput.playPromptBeep() },
             onWakeWordStateRequested = { enable ->
-                if (enable) wakeWordEngine.resume() else wakeWordEngine.pause()
+                if (enable) {
+                    abandonDuckingAudioFocus()
+                    wakeWordEngine.resume()
+                } else {
+                    requestDuckingAudioFocus()
+                    wakeWordEngine.pause()
+                }
             },
             onStartSpeechListeningRequested = {
                 speechRecognizerManager.startListening()

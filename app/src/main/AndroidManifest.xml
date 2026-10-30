@@ -31,6 +31,11 @@
     <!-- ── Phase 2: Contact Search ────────────────────────────── -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
+    <!-- ── Auto-start & App Launching ────────────────────────── -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+
     <application
         android:name=".SpikeApp"
         android:allowBackup="false"
@@ -86,11 +91,31 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- ── Boot Receiver for auto-start on device power-on ────────── -->
+        <receiver
+            android:name="com.spidey.assistant.voice.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
     <!-- ── App install packages that may be queried ──────── -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <package android:name="com.google.android.youtube" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.android.chrome" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.instagram.android" />
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="com.google.android.gm" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />

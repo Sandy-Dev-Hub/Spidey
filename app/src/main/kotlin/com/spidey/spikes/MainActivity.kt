@@ -24,6 +24,9 @@ import com.spidey.spikes.util.SpikeLogger
 
 import com.spidey.assistant.ui.home.HomeScreen
 
+import android.content.pm.PackageManager
+import com.spidey.assistant.voice.WakeWordService
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,9 +34,18 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         SpikeLogger.init(this)
 
-        // Request notifications permission upfront (Android 13+)
+        // Request notifications & mic permissions upfront
+        val permissionsToRequest = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (permissionsToRequest.isNotEmpty()) {
+            requestPermissions(permissionsToRequest.toTypedArray(), 100)
         }
 
         setContent {
@@ -41,6 +53,29 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     SpideyNavGraph()
                 }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Auto-start wake word service if mic permission is granted and service is not already running
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            if (!WakeWordService.isServiceRunning.value) {
+                WakeWordService.start(this)
+            }
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            if (!WakeWordService.isServiceRunning.value) {
+                WakeWordService.start(this)
             }
         }
     }

@@ -8,10 +8,28 @@
 | Phase 1 - Voice Foundation | **DONE** | `main` | `phase-1-done` |
 | Phase 2 - Contact Search | **DONE** | `main` | `phase-2-done` |
 | Phase 3 - Calling and SIM | **VERIFIED ON DEVICE** | `phase-3-calling` | `phase-3-done` |
+| Multi-App & Auto-Wake Hotfix | **VERIFIED ON DEVICE** | `main` | `assistant-hotfix-done` |
 | Phase 4 - AI Understanding | NEXT UP | - | - |
-| Phase 5 - Multi-App Actions | WAITING | - | - |
+| Phase 5 - Multi-App Actions | IN PROGRESS | - | - |
 | Phase 6 - Background Reliability | WAITING | - | - |
 | Phase 7 - Security and Release | WAITING | - | - |
+
+---
+
+## Multi-App & Auto-Wake Hotfix
+
+**Goal:** Fix universal app opening (WhatsApp, Chrome, Camera, Settings, etc.), YouTube song search/playback, audio focus ducking to eliminate media conflicts, and always-on wake word auto-start on app launch and boot.
+
+**Completed:** 2026-10-30
+
+### Deliverables
+- [x] **Universal App Launcher (`OpenAppAction.kt` & `OpenAppHandler.kt`):** Dynamic package discovery via `PackageManager.queryIntentActivities` + 14 pre-mapped popular apps (WhatsApp, Chrome, Camera, Settings, Spotify, Instagram, Maps, Gmail, Phone, Messages, Gallery, Calculator, Clock).
+- [x] **YouTube Search & Play (`SearchYouTubeAction.kt`):** Direct YouTube app search intent (`vnd.youtube://results?search_query=...` with web fallback) supporting natural queries: `"go to search bar and search [song]"`, `"search [query] on youtube"`, `"play [query] on youtube"`, and `"play [song]"`.
+- [x] **Audio Focus Ducking (`WakeWordService.kt`):** Requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` when wake word triggers or mic starts listening, automatically ducking background media (e.g., YouTube playing in background) and preventing `ERROR_AUDIO` (3) / `ERROR_CLIENT` (5) / `ERROR_SERVER_DISCONNECTED` (11).
+- [x] **Auto-Start & Boot Receiver (`BootReceiver.kt`, `MainActivity.kt`, `HomeScreen.kt`):** Automatically starts `WakeWordService` on device boot (`BOOT_COMPLETED`), activity start (`onResume`), or permission grant, removing any requirement to click "Start Assistant".
+- [x] **Speech Error & Recovery Polish (`ConversationManager.kt`):** Catches transient speech recognizer codes (1, 2, 3, 5, 6, 7, 8, 11) gracefully without showing an error banner, and auto-clears errors on returning to sleep.
+- [x] **Unit Tests:** 42/42 tests passing across `IntentEngineTest`, `CallActionHandlerTest`, `ConversationManagerTest`, etc.
+- [x] **Device Verified:** Installed and running live on Samsung Galaxy A14 5G (`RZCW60PWC7J`).
 
 ---
 

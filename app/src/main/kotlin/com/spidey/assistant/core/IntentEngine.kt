@@ -6,6 +6,7 @@ import com.spidey.assistant.actions.CallContactAction
 import com.spidey.assistant.actions.FindContactAction
 import com.spidey.assistant.actions.GreetingAction
 import com.spidey.assistant.actions.OpenAppAction
+import com.spidey.assistant.actions.SearchYouTubeAction
 import com.spidey.assistant.calling.CallSessionManager
 import com.spidey.assistant.safety.ConfirmationPolicy
 
@@ -32,19 +33,25 @@ class IntentEngine {
             return GreetingAction(queryText = text)
         }
 
-        // 3. Check for Open App intent
+        // 3. Check for YouTube Search / Play intent (e.g. "search song on youtube", "play ...")
+        val ytSearchAction = matchYouTubeSearch(normalized)
+        if (ytSearchAction != null) {
+            return ytSearchAction
+        }
+
+        // 4. Check for Open App intent (e.g. "open whatsapp", "open chrome", "open youtube")
         val openAppAction = matchOpenApp(normalized)
         if (openAppAction != null) {
             return openAppAction
         }
 
-        // 4. Check for Calling intent (Phase 3)
+        // 5. Check for Calling intent (Phase 3)
         val callAction = matchCall(normalized)
         if (callAction != null) {
             return callAction
         }
 
-        // 5. Check for Contact Search intent (Phase 2)
+        // 6. Check for Contact Search intent (Phase 2)
         val contactAction = matchContactSearch(normalized)
         if (contactAction != null) {
             return contactAction
@@ -137,14 +144,113 @@ class IntentEngine {
         return false
     }
 
-    private fun matchOpenApp(text: String): AssistantAction? {
-        val clean = text.replace(Regex("[^a-z0-9 ]"), " ").trim()
-        val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+    private fun matchYouTubeSearch(text: String): AssistantAction? {
+        val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
 
-        if ("youtube" in words) {
-            val appTriggers = setOf("open", "launch", "start", "play", "go", "show", "run")
-            if (words.size == 1 || words.any { it in appTriggers }) {
-                return OpenAppAction(AllowedApp.YOUTUBE)
+        // 1. Explicit YouTube search patterns
+        // e.g. "go to search bar and search song ... on youtube"
+        // e.g. "search song on youtube", "play ... on youtube"
+        val explicitPrefixes = listOf(
+            "go to search bar and search for",
+            "go to search bar and search",
+            "search bar and search",
+            "search for song",
+            "search song",
+            "search on youtube for",
+            "search on youtube",
+            "search in youtube for",
+            "search in youtube",
+            "search youtube for",
+            "search youtube",
+            "play on youtube",
+            "play in youtube",
+            "in youtube search for",
+            "in youtube search"
+        )
+
+        for (prefix in explicitPrefixes) {
+            if (clean.startsWith("$prefix ")) {
+                var query = clean.removePrefix("$prefix ").trim()
+                query = query.removeSuffix(" on youtube").removeSuffix(" in youtube").trim()
+                if (query.isNotBlank()) {
+                    return SearchYouTubeAction(query = query)
+                }
+            }
+        }
+
+        // 2. Trailing "on youtube" patterns: e.g. "search despacito on youtube", "play believer on youtube"
+        if (clean.endsWith(" on youtube") || clean.endsWith(" in youtube")) {
+            var trimmed = clean.removeSuffix(" on youtube").removeSuffix(" in youtube").trim()
+            val leadingTriggers = listOf("search for", "search", "play", "find", "look for", "listen to")
+            for (trigger in leadingTriggers) {
+                if (trimmed.startsWith("$trigger ")) {
+                    trimmed = trimmed.removePrefix("$trigger ").trim()
+                    break
+                }
+            }
+            if (trimmed.isNotBlank()) {
+                return SearchYouTubeAction(query = trimmed)
+            }
+        }
+
+        // 3. "play [song/artist]" intent (e.g. "play some song", "play believer")
+        if (clean.startsWith("play ") && clean != "play youtube") {
+            val query = clean.removePrefix("play ").trim()
+            if (query.isNotBlank()) {
+                return SearchYouTubeAction(query = query)
+            }
+        }
+
+        return null
+    }
+
+    private fun matchOpenApp(text: String): AssistantAction? {
+        val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+        val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+        if (words.isEmpty()) return null
+
+        val appTriggers = listOf("open up", "open", "launch", "start", "play", "go to", "show", "run")
+
+        var appName: String? = null
+
+        // Check if starts with a trigger
+        for (trigger in appTriggers) {
+            if (clean.startsWith("$trigger ")) {
+                val candidate = clean.removePrefix("$trigger ").trim()
+                if (candidate.isNotBlank()) {
+                    appName = candidate
+                    break
+                }
+            }
+        }
+
+        // Single word or known standalone app name (e.g. "whatsapp", "youtube", "camera", "spotify", "chrome")
+        if (appName == null) {
+            if (words.size in 1..2) {
+                val known = AllowedApp.entries.firstOrNull {
+                    it.displayName.equals(clean, ignoreCase = true) ||
+                    it.aliases.any { alias -> alias.equals(clean, ignoreCase = true) }
+                }
+                if (known != null) {
+                    appName = known.displayName
+                }
+            }
+        }
+
+        if (appName != null) {
+            // Strip any trailing filler words
+            appName = appName.removeSuffix(" app").removeSuffix(" application").trim()
+
+            // Check if matches AllowedApp enum
+            val matchedAllowed = AllowedApp.entries.firstOrNull {
+                it.displayName.equals(appName, ignoreCase = true) ||
+                it.aliases.any { alias -> alias.equals(appName, ignoreCase = true) }
+            }
+
+            return if (matchedAllowed != null) {
+                OpenAppAction(appName = matchedAllowed.displayName, packageName = matchedAllowed.packageName)
+            } else {
+                OpenAppAction(appName = appName)
             }
         }
 
