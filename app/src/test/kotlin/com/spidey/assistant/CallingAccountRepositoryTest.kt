@@ -45,6 +45,31 @@ class CallingAccountRepositoryTest {
         val secondMatch = repo.matchAccount("second", accounts)
         assertNotNull(secondMatch)
         assertEquals("Jio 5G", secondMatch?.label)
+
+        // Expanded spoken variants
+        val simOneMatch = repo.matchAccount("sim one", accounts)
+        assertNotNull(simOneMatch)
+        assertEquals("Airtel FastLane", simOneMatch?.label)
+
+        val oneMatch = repo.matchAccount("one", accounts)
+        assertNotNull(oneMatch)
+        assertEquals("Airtel FastLane", oneMatch?.label)
+
+        val firstSimMatch = repo.matchAccount("first sim", accounts)
+        assertNotNull(firstSimMatch)
+        assertEquals("Airtel FastLane", firstSimMatch?.label)
+
+        val simTwoMatch = repo.matchAccount("sim two", accounts)
+        assertNotNull(simTwoMatch)
+        assertEquals("Jio 5G", simTwoMatch?.label)
+
+        val twoMatch = repo.matchAccount("two", accounts)
+        assertNotNull(twoMatch)
+        assertEquals("Jio 5G", twoMatch?.label)
+
+        val secondSimMatch = repo.matchAccount("second sim", accounts)
+        assertNotNull(secondSimMatch)
+        assertEquals("Jio 5G", secondSimMatch?.label)
     }
 
     @Test

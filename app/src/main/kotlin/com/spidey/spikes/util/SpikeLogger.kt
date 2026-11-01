@@ -40,12 +40,16 @@ object SpikeLogger {
 
     fun log(tag: String, message: String) {
         val entry = "${fmt.format(Date())} [$tag] $message"
-        Log.d(TAG, entry)
+        try {
+            Log.d(TAG, entry)
+        } catch (_: Throwable) {}
         synchronized(buffer) {
             if (buffer.size >= 500) buffer.removeFirst()
             buffer.addLast(entry)
         }
-        writeToFile(entry)
+        try {
+            writeToFile(entry)
+        } catch (_: Throwable) {}
     }
 
     /** Returns a snapshot of the in-memory buffer. */

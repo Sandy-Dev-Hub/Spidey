@@ -194,10 +194,22 @@ class IntentEngineTest {
         val jioAction = intentEngine.parse("Jio", candidates)
         assertTrue(jioAction is com.spidey.assistant.actions.CallContactAction)
         assertEquals("Jio", (jioAction as com.spidey.assistant.actions.CallContactAction).selectedSim)
+        assertTrue((jioAction as com.spidey.assistant.actions.CallContactAction).isConfirmed)
 
         val secondAction = intentEngine.parse("second", candidates)
         assertTrue(secondAction is com.spidey.assistant.actions.CallContactAction)
         assertEquals("Jio", (secondAction as com.spidey.assistant.actions.CallContactAction).selectedSim)
+        assertTrue((secondAction as com.spidey.assistant.actions.CallContactAction).isConfirmed)
+
+        val sim1Action = intentEngine.parse("sim 1", candidates)
+        assertTrue(sim1Action is com.spidey.assistant.actions.CallContactAction)
+        assertEquals("Airtel", (sim1Action as com.spidey.assistant.actions.CallContactAction).selectedSim)
+        assertTrue((sim1Action as com.spidey.assistant.actions.CallContactAction).isConfirmed)
+
+        val simOneAction = intentEngine.parse("sim one", candidates)
+        assertTrue(simOneAction is com.spidey.assistant.actions.CallContactAction)
+        assertEquals("Airtel", (simOneAction as com.spidey.assistant.actions.CallContactAction).selectedSim)
+        assertTrue((simOneAction as com.spidey.assistant.actions.CallContactAction).isConfirmed)
     }
 
     @Test

@@ -39,13 +39,17 @@ class SpeechRecognizerManager(
         mainHandler.post {
             try {
                 mainHandler.removeCallbacks(timeoutRunnable)
-                try {
-                    recognizer?.destroy()
-                } catch (_: Exception) {}
-
-                val newRecognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
-                newRecognizer.setRecognitionListener(createListener())
-                recognizer = newRecognizer
+                var r = recognizer
+                if (r == null) {
+                    r = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
+                    r.setRecognitionListener(createListener())
+                    recognizer = r
+                } else {
+                    try {
+                        r.cancel()
+                    } catch (_: Exception) {}
+                }
+                val newRecognizer = r
 
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -137,6 +141,13 @@ class SpeechRecognizerManager(
             isListening = false
             val errorMsg = mapErrorCode(error)
             Log.w(TAG, "SpeechRecognizer onError: $error ($errorMsg)")
+
+            if (error == 11 || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                try {
+                    recognizer?.destroy()
+                } catch (_: Exception) {}
+                recognizer = null
+            }
 
             // Codes 6 (ERROR_SPEECH_TIMEOUT), 7 (ERROR_NO_MATCH), 11 (ERROR_SERVER_DISCONNECTED)
             // are idle/silence timeouts that should trigger follow-up or re-listen rather than fatal errors.

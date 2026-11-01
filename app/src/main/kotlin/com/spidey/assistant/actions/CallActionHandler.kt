@@ -139,11 +139,13 @@ class CallActionHandler(
             } else null
 
             if (matched != null) {
+                com.spidey.spikes.util.SpikeLogger.log("SPIDEY", "Matched SIM: ${matched.label} for input: ${action.selectedSim}")
                 matched
             } else {
                 CallSessionManager.startSession(contact.displayName)
                 val labels = accounts.map { it.label }
                 val question = "Which SIM would you like to use: ${labels.joinToString(" or ")}?"
+                com.spidey.spikes.util.SpikeLogger.log("SPIDEY", "Asking SIM choice: $question")
                 return ActionResult.NeedsClarification(
                     question = question,
                     candidates = listOf("sim_choice") + labels
@@ -161,6 +163,7 @@ class CallActionHandler(
         // 6. Enforce Spoken Confirmation
         if (!action.isConfirmed) {
             val prompt = ConfirmationPolicy.formatPrompt(contact.displayName, chosenAccount?.label)
+            com.spidey.spikes.util.SpikeLogger.log("SPIDEY", "Asking call confirmation: $prompt")
             return ActionResult.NeedsClarification(
                 question = prompt,
                 candidates = listOf("confirm_call", "yes", "no", "cancel")
@@ -170,9 +173,11 @@ class CallActionHandler(
         // 7. Place Call via CallCoordinator
         CallSessionManager.clear()
         val dialTarget = chosenNumber.number
+        com.spidey.spikes.util.SpikeLogger.log("SPIDEY", "Initiating call to ${contact.displayName} ($dialTarget) on account ${chosenAccount?.label}")
         val callResult = callInitiator?.invoke(dialTarget, chosenAccount?.handle)
             ?: callCoordinator?.initiateCall(dialTarget, chosenAccount?.handle)
             ?: CallInitiationResult.Direct("Direct")
+        com.spidey.spikes.util.SpikeLogger.log("SPIDEY", "Call result: $callResult")
         return when (callResult) {
             is CallInitiationResult.Direct -> {
                 ActionResult.Success(spokenMessage = "Calling ${contact.displayName}.")

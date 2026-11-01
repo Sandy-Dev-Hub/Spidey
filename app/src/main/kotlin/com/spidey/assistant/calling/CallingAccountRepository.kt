@@ -77,22 +77,36 @@ class CallingAccountRepository(private val context: Context? = null) {
     }
 
     fun matchAccount(query: String, accounts: List<CallingAccount>): CallingAccount? {
-        val norm = query.trim().lowercase()
+        val norm = query.trim().lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
 
         // 1. Exact or partial carrier match (e.g. "airtel", "jio")
         for (acc in accounts) {
-            val normLabel = acc.label.lowercase()
-            if (normLabel.contains(norm) || norm.contains(normLabel)) {
+            val normLabel = acc.label.lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+            if (normLabel.isNotBlank() && (norm.contains(normLabel) || normLabel.contains(norm))) {
                 return acc
             }
         }
 
-        // 2. Slot index / ordinal matching ("sim 1", "sim 2", "1", "2", "first", "second")
-        if (norm in setOf("sim 1", "sim1", "1", "first", "the first one", "first one")) {
-            return accounts.getOrNull(0)
+        // 2. Comprehensive SIM 1 variations
+        val sim1Patterns = listOf(
+            "sim 1", "sim1", "sim one", "1", "one", "first", "the first", "first one",
+            "the first one", "first sim", "the first sim", "sim 1 please", "sim one please"
+        )
+        for (pattern in sim1Patterns) {
+            if (norm == pattern || norm.startsWith("$pattern ") || norm.endsWith(" $pattern") || norm.contains(" $pattern ")) {
+                return accounts.getOrNull(0)
+            }
         }
-        if (norm in setOf("sim 2", "sim2", "2", "second", "the second one", "second one")) {
-            return accounts.getOrNull(1)
+
+        // 3. Comprehensive SIM 2 variations
+        val sim2Patterns = listOf(
+            "sim 2", "sim2", "sim two", "2", "two", "second", "the second", "second one",
+            "the second one", "second sim", "the second sim", "sim 2 please", "sim two please"
+        )
+        for (pattern in sim2Patterns) {
+            if (norm == pattern || norm.startsWith("$pattern ") || norm.endsWith(" $pattern") || norm.contains(" $pattern ")) {
+                return accounts.getOrNull(1)
+            }
         }
 
         return null

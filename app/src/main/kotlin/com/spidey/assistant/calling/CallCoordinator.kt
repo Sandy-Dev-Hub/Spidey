@@ -61,38 +61,48 @@ class CallCoordinator(
                         extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, accountHandle)
                     }
                     tm.placeCall(uri, extras)
-                    Log.i(TAG, "Call placed via TelecomManager.placeCall with account: ${accountHandle?.id}")
+                    val msg = "Call placed via TelecomManager.placeCall with account: ${accountHandle?.id}"
+                    Log.i(TAG, msg)
+                    com.spidey.spikes.util.SpikeLogger.log("SPIDEY", msg)
                     return CallInitiationResult.Direct("TelecomManager")
                 }
             } catch (e: SecurityException) {
-                Log.w(TAG, "TelecomManager SecurityException: ${e.message}")
+                val warn = "TelecomManager SecurityException: ${e.message}"
+                Log.w(TAG, warn)
+                com.spidey.spikes.util.SpikeLogger.log("SPIDEY", warn)
             } catch (e: Exception) {
-                Log.w(TAG, "TelecomManager placeCall failed: ${e.message}")
+                val warn = "TelecomManager placeCall failed: ${e.message}"
+                Log.w(TAG, warn)
+                com.spidey.spikes.util.SpikeLogger.log("SPIDEY", warn)
             }
 
-            // Fallback to ACTION_CALL
+            // Fallback to ACTION_CALL with BAL launch
             try {
-                val callIntent = Intent(Intent.ACTION_CALL, uri).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                ctx.startActivity(callIntent)
-                Log.i(TAG, "Call placed via Intent.ACTION_CALL")
+                val callIntent = Intent(Intent.ACTION_CALL, uri)
+                com.spidey.assistant.actions.BackgroundAppLauncher.launch(ctx, callIntent)
+                val msg = "Call placed via Intent.ACTION_CALL with BAL launch"
+                Log.i(TAG, msg)
+                com.spidey.spikes.util.SpikeLogger.log("SPIDEY", msg)
                 return CallInitiationResult.Direct("ACTION_CALL")
             } catch (e: Exception) {
-                Log.w(TAG, "ACTION_CALL failed: ${e.message}")
+                val warn = "ACTION_CALL failed: ${e.message}"
+                Log.w(TAG, warn)
+                com.spidey.spikes.util.SpikeLogger.log("SPIDEY", warn)
             }
         }
 
-        // 2. Fallback: Open system dialer (ACTION_DIAL)
+        // 2. Fallback: Open system dialer (ACTION_DIAL) with BAL launch
         return try {
-            val dialIntent = Intent(Intent.ACTION_DIAL, uri).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            ctx.startActivity(dialIntent)
-            Log.i(TAG, "Opened system dialer via ACTION_DIAL")
+            val dialIntent = Intent(Intent.ACTION_DIAL, uri)
+            com.spidey.assistant.actions.BackgroundAppLauncher.launch(ctx, dialIntent)
+            val msg = "Opened system dialer via ACTION_DIAL with BAL launch"
+            Log.i(TAG, msg)
+            com.spidey.spikes.util.SpikeLogger.log("SPIDEY", msg)
             CallInitiationResult.FallbackDialer("I've opened the dialer with the number ready.")
         } catch (e: Exception) {
-            Log.e(TAG, "ACTION_DIAL failed: ${e.message}")
+            val err = "ACTION_DIAL failed: ${e.message}"
+            Log.e(TAG, err)
+            com.spidey.spikes.util.SpikeLogger.log("SPIDEY", err)
             CallInitiationResult.Failure(
                 reason = e.message ?: "Could not open dialer",
                 message = "I couldn't place the call or open the dialer."

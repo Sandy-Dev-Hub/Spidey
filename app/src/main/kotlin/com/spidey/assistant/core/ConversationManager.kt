@@ -287,7 +287,14 @@ class ConversationManager(
                 speakResponse(result.question) {
                     // Re-enter listening for the user's answer
                     _state.value = AssistantState.LISTENING
-                    onStartSpeechListeningRequested()
+                    scope.launch {
+                        kotlinx.coroutines.delay(250)
+                        mutex.withLock {
+                            if (_state.value == AssistantState.LISTENING) {
+                                onStartSpeechListeningRequested()
+                            }
+                        }
+                    }
                 }
             }
             is ActionResult.Cancelled -> {

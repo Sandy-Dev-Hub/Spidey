@@ -109,12 +109,19 @@ class IntentEngine {
         // B. SIM account selection
         if (candidatesContext.contains("sim_choice")) {
             val session = CallSessionManager.getValidSession()
+            if (ConfirmationPolicy.evaluate(reply) == ConfirmationPolicy.ConfirmationResult.CANCELLED) {
+                return CallContactAction(
+                    contactQuery = session?.contactQuery ?: "",
+                    isCancelled = true
+                )
+            }
             val choices = candidatesContext.filter { it != "sim_choice" }
             val chosen = resolveClarification(reply, choices) ?: reply
             return CallContactAction(
                 contactQuery = session?.contactQuery ?: "",
                 selectedNumber = session?.selectedNumber,
-                selectedSim = chosen
+                selectedSim = chosen,
+                isConfirmed = true
             )
         }
 
@@ -511,13 +518,13 @@ class IntentEngine {
 
     private fun parseCallTarget(target: String): CallContactAction {
         // Check for SIM trailer: "on airtel", "on jio", "on sim 1", "using jio", etc.
-        val simPattern = Regex("^(.*?)\\s+(?:on|using|via|through)\\s+(sim\\s*\\d+|airtel.*|jio.*|vi.*|bsnl.*)$", RegexOption.IGNORE_CASE)
+        val simPattern = Regex("^(.*?)\\s+(?:on|using|via|through)\\s+(sim\\s*\\d+|sim\\s*one|sim\\s*two|first\\s*sim|second\\s*sim|airtel.*|jio.*|vi.*|bsnl.*)$", RegexOption.IGNORE_CASE)
         val match = simPattern.find(target)
 
         return if (match != null) {
             val contact = match.groupValues[1].trim()
             val sim = match.groupValues[2].trim()
-            CallContactAction(contactQuery = contact, selectedSim = sim)
+            CallContactAction(contactQuery = contact, selectedSim = sim, isConfirmed = true)
         } else {
             CallContactAction(contactQuery = target)
         }
@@ -570,26 +577,55 @@ class IntentEngine {
     }
 
     private fun resolveClarification(reply: String, candidates: List<String>): String? {
-        val clean = reply.replace(Regex("[^a-z0-9 ]"), " ").trim()
+        val clean = reply.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
 
-        // Ordinal indicators
-        if (clean in setOf("first", "the first", "first one", "the first one", "1", "one", "number one")) {
-            return candidates.getOrNull(0)
-        }
-        if (clean in setOf("second", "the second", "second one", "the second one", "2", "two", "number two")) {
-            return candidates.getOrNull(1)
-        }
-        if (clean in setOf("third", "the third", "third one", "the third one", "3", "three", "number three")) {
-            return candidates.getOrNull(2)
-        }
-        if (clean in setOf("fourth", "the fourth", "fourth one", "the fourth one", "4", "four", "number four")) {
-            return candidates.getOrNull(3)
+        // 1. First / SIM 1 indicators
+        val firstPatterns = listOf(
+            "first", "the first", "first one", "the first one", "1", "one", "number one",
+            "sim 1", "sim1", "sim one", "first sim", "the first sim", "use sim 1", "use sim one"
+        )
+        for (pattern in firstPatterns) {
+            if (clean == pattern || clean.startsWith("$pattern ") || clean.endsWith(" $pattern") || clean.contains(" $pattern ")) {
+                return candidates.getOrNull(0)
+            }
         }
 
-        // Substring / token matching against candidate names
+        // 2. Second / SIM 2 indicators
+        val secondPatterns = listOf(
+            "second", "the second", "second one", "the second one", "2", "two", "number two",
+            "sim 2", "sim2", "sim two", "second sim", "the second sim", "use sim 2", "use sim two"
+        )
+        for (pattern in secondPatterns) {
+            if (clean == pattern || clean.startsWith("$pattern ") || clean.endsWith(" $pattern") || clean.contains(" $pattern ")) {
+                return candidates.getOrNull(1)
+            }
+        }
+
+        // 3. Third indicators
+        val thirdPatterns = listOf(
+            "third", "the third", "third one", "the third one", "3", "three", "number three",
+            "sim 3", "sim3", "sim three", "third sim"
+        )
+        for (pattern in thirdPatterns) {
+            if (clean == pattern || clean.startsWith("$pattern ") || clean.endsWith(" $pattern") || clean.contains(" $pattern ")) {
+                return candidates.getOrNull(2)
+            }
+        }
+
+        // 4. Fourth indicators
+        val fourthPatterns = listOf(
+            "fourth", "the fourth", "fourth one", "the fourth one", "4", "four", "number four"
+        )
+        for (pattern in fourthPatterns) {
+            if (clean == pattern || clean.startsWith("$pattern ") || clean.endsWith(" $pattern") || clean.contains(" $pattern ")) {
+                return candidates.getOrNull(3)
+            }
+        }
+
+        // 5. Substring / token matching against candidate names
         for (candidate in candidates) {
-            val normCandidate = candidate.lowercase().replace(Regex("[^a-z0-9 ]"), " ").trim()
-            if (normCandidate.contains(clean) || clean.contains(normCandidate)) {
+            val normCandidate = candidate.lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+            if (normCandidate.isNotBlank() && (normCandidate.contains(clean) || clean.contains(normCandidate))) {
                 return candidate
             }
         }

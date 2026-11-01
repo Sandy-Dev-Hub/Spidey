@@ -43,8 +43,7 @@ object BackgroundAppLauncher {
                 context,
                 (System.currentTimeMillis() % 10000).toInt(),
                 intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                optionsBundle
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             pendingIntent.send(context, 0, null, null, null, null, optionsBundle)
             SpikeLogger.log(TAG, "Sent launch via PendingIntent with MODE_BACKGROUND_ACTIVITY_START_ALLOWED")
