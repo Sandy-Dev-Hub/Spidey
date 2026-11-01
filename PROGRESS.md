@@ -1,18 +1,38 @@
 # SPIDEY - Progress Tracker
 
-## Current Phase: Phase 3 - Calling and SIM Selection
+## Current Phase: Fix Round - Task 1 (Wake Word Outside App)
 
 | Phase | Status | Branch | Tag |
-|-------|--------|--------|-----|
+|---|---|---|---|
 | Phase 0 - Feasibility | **DONE** | `main` | `phase-0-done` |
 | Phase 1 - Voice Foundation | **DONE** | `main` | `phase-1-done` |
 | Phase 2 - Contact Search | **DONE** | `main` | `phase-2-done` |
 | Phase 3 - Calling and SIM | **VERIFIED ON DEVICE** | `phase-3-calling` | `phase-3-done` |
 | Multi-App & Auto-Wake Hotfix | **VERIFIED ON DEVICE** | `main` | `assistant-hotfix-done` |
-| Phase 4 - AI Understanding | NEXT UP | - | - |
-| Phase 5 - Multi-App Actions | IN PROGRESS | - | - |
-| Phase 6 - Background Reliability | WAITING | - | - |
-| Phase 7 - Security and Release | WAITING | - | - |
+| **Fix Round: Task 1 (Wake Word Outside App)** | **BUILT & TESTED** | `phase-0-feasibility` | - |
+| Fix Round: Task 2 (Background Launch) | WAITING | - | - |
+| Fix Round: Task 3 (Any App By Name) | WAITING | - | - |
+| Fix Round: Task 4 (Command Routing Fix) | WAITING | - | - |
+| Fix Round: Task 5 (YouTube Search & Play) | WAITING | - | - |
+| Fix Round: Task 6 (Supported Unlock Flow) | WAITING | - | - |
+
+---
+
+## Fix Round - Task 1: Wake Word Outside App
+
+**Goal:** "Hey Spidey" / "Spider" is detected on the home screen, inside other apps, with the screen off or locked, without needing the spike app on screen.
+
+**Completed:** 2026-10-31
+
+### Implementation Deliverables
+- [x] **Decoupled from Composable:** Replaced in-screen spike Vosk listener with a persistent `WakeWordService` foreground service of type `microphone`.
+- [x] **Real-Time Audio Loop & FPS Metrics (`WakeWordEngine.kt`):** Explicit `AudioRecord` thread loop (16 kHz, 16-bit mono, 200 ms / 3200-short buffers) directly feeding Vosk Kaldi model. Real-time audio FPS calculation (~5.0 FPS nominal) with OS silence detection (`isSilenced`).
+- [x] **Partial WakeLock (`WakeWordService.kt`):** Acquires `PARTIAL_WAKE_LOCK` (`Spidey::WakeWordService`) to prevent CPU suspension when the screen turns off or device is locked.
+- [x] **Persistent Notification with Stop Button:** `FOREGROUND_SERVICE_TYPE_MICROPHONE` notification with dynamic state text and explicit `Stop` intent.
+- [x] **Diagnostics Panel (`HomeScreen.kt`):** Real-time display showing Foreground Service alive, Audio FPS, total detection count, last wake timestamp & keyword, and CPU WakeLock status.
+- [x] **Unified Logging (`SpikeLogger.kt`):** Logcat tag updated to `SPIDEY` and persistent log file set to `spidey_log.txt`.
+- [x] **Keyword Recognition Support:** Matches "Hey Spidey", "Spidey", "Hey Spider", "Spider" (plus phonetic variants).
+- [x] **Unit Tests & Build:** Clean build and 42/42 unit tests passing.
 
 ---
 
@@ -50,7 +70,6 @@
 - [x] **Service Integration:** Registered `CallActionHandler` in `WakeWordService`.
 - [x] **Unit Tests:** 40/40 tests passing across `CallActionHandlerTest`, `CallingAccountRepositoryTest`, `ConfirmationPolicyTest`, and `IntentEngineTest`.
 - [x] **Phone Verification:** Deployed and running on Samsung Galaxy A14 5G.
-
 
 ---
 
@@ -109,7 +128,7 @@
 ### Environment Status (verified 2026-10-20)
 
 | Check | Status | Verified Detail |
-|-------|--------|-----------------|
+|---|---|---|
 | Git repo initialized | DONE | Branch: main (origin: github.com/Sandy-Dev-Hub/Spidey) |
 | Android Studio | DONE | C:\Program Files\Android\Android Studio |
 | Bundled JDK | DONE | OpenJDK 25.0.3 (jbr\bin\java.exe) |
@@ -130,7 +149,7 @@
 ### Spike Results
 
 | Spike | Status | Notes |
-|-------|--------|-------|
+|---|---|---|
 | Spike 1: Wake word | **PASS** | Vosk Indian English offline model; trigger phrase: "Hey Spider" / "Spider". |
 | Spike 2: Mic handoff | **PASS** | 645 ms total time to ready; accurate `en-IN` capture on Samsung device. |
 | Spike 3: Background app launch | **PASS** | `startActivity` works screen-on; locked screen requires keyguard dismissal flow. |
@@ -146,5 +165,4 @@
 
 ---
 
-*Updated: 2026-10-25*
-
+*Updated: 2026-10-31*

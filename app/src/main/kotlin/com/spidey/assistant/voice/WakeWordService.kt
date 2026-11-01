@@ -8,13 +8,14 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.os.Build
-import android.os.IBinder
-import android.util.Log
-import androidx.core.app.NotificationCompat
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
+import androidx.core.app.NotificationCompat
 import com.spidey.assistant.actions.CallActionHandler
 import com.spidey.assistant.actions.FindContactHandler
 import com.spidey.assistant.actions.GreetingHandler
@@ -25,7 +26,6 @@ import com.spidey.assistant.actions.TimeHandler
 import com.spidey.assistant.calling.CallCoordinator
 import com.spidey.assistant.calling.CallingAccountRepository
 import com.spidey.assistant.contacts.ContactRepository
-
 import com.spidey.assistant.core.ActionRouter
 import com.spidey.assistant.core.AssistantState
 import com.spidey.assistant.core.ConversationManager
@@ -34,18 +34,22 @@ import com.spidey.assistant.data.SpideyDatabase
 import com.spidey.assistant.safety.PermissionManager
 import com.spidey.assistant.unlock.UnlockCoordinator
 import com.spidey.spikes.MainActivity
-import com.spidey.spikes.R
+import com.spidey.spikes.util.SpikeLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * Foreground service that keeps SPIDEY running in the background listening for "Hey Spider".
- * Provides persistent notification with status updates and an explicit Stop button.
+ * Robust background foreground service that keeps SPIDEY running continuously.
+ * Listens for "Hey Spidey", "Spidey", "Hey Spider", and "Spider" on the home screen,
+ * inside other apps, and when the screen is off/locked.
+ *
+ * Holds a partial wake lock to prevent CPU suspension when the screen turns off.
  */
 class WakeWordService : Service() {
 
@@ -58,10 +62,13 @@ class WakeWordService : Service() {
     private lateinit var wakeWordEngine: WakeWordEngine
     private lateinit var conversationManager: ConversationManager
 
+    private var wakeLock: PowerManager.WakeLock? = null
+
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Creating WakeWordService")
+        SpikeLogger.log("SPIDEY", "Creating WakeWordService (Android 15 Foreground Service)")
         createNotificationChannel()
+        acquireWakeLock()
 
         val db = SpideyDatabase.getInstance(this)
         val permManager = PermissionManager(this)
@@ -134,15 +141,15 @@ class WakeWordService : Service() {
         wakeWordEngine = WakeWordEngine(
             context = this,
             onWakeWordDetected = {
-                Log.d(TAG, "Wake word triggered!")
+                SpikeLogger.log("SPIDEY", "Wake word detected callback received! Ducking audio & starting conversation")
                 requestDuckingAudioFocus()
                 conversationManager.onWakeWordDetected()
             },
             onModelLoaded = {
-                Log.d(TAG, "Model loaded into memory, starting wake word spotting")
+                SpikeLogger.log("SPIDEY", "Vosk model ready in memory, starting wake word loop")
                 wakeWordEngine.start()
             },
-            onError = { err -> Log.e(TAG, "WakeWordEngine error: $err") }
+            onError = { err -> SpikeLogger.log("SPIDEY", "WakeWordEngine error: $err") }
         )
 
         conversationManager = ConversationManager(
@@ -189,16 +196,51 @@ class WakeWordService : Service() {
             }
         }
 
+        // Bridge engine diagnostics to service StateFlow
+        serviceScope.launch {
+            wakeWordEngine.diagnostics.collectLatest { diag ->
+                _diagnostics.value = diag.copy(isServiceAlive = _isServiceRunning.value)
+            }
+        }
+
         // Start listening for wake word
         wakeWordEngine.start()
     }
 
+    private fun acquireWakeLock() {
+        if (wakeLock == null) {
+            val pm = getSystemService(PowerManager::class.java)
+            wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Spidey::WakeWordService")?.apply {
+                setReferenceCounted(false)
+            }
+        }
+        wakeLock?.let {
+            if (!it.isHeld) {
+                it.acquire()
+                SpikeLogger.log("SPIDEY", "PARTIAL_WAKE_LOCK acquired – CPU active during screen-off")
+            }
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+                SpikeLogger.log("SPIDEY", "WakeLock released")
+            }
+        }
+        wakeLock = null
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            Log.d(TAG, "Received ACTION_STOP intent, shutting down service")
+        val action = intent?.action
+        SpikeLogger.log("SPIDEY", "WakeWordService onStartCommand action=$action")
+        if (action == ACTION_STOP) {
+            SpikeLogger.log("SPIDEY", "Received ACTION_STOP intent, shutting down assistant")
             stopAssistant()
             return START_NOT_STICKY
         }
+        acquireWakeLock()
         return START_STICKY
     }
 
@@ -224,7 +266,9 @@ class WakeWordService : Service() {
         val openAppIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -236,7 +280,7 @@ class WakeWordService : Service() {
         )
 
         val statusText = when (state) {
-            AssistantState.SLEEPING -> "Listening for \"Hey Spider\"..."
+            AssistantState.SLEEPING -> "Listening for \"Hey Spidey\" / \"Spider\"..."
             AssistantState.LISTENING -> "Listening to your command..."
             AssistantState.PROCESSING -> "Processing command..."
             AssistantState.AWAITING_CONFIRMATION -> "Waiting for confirmation..."
@@ -273,8 +317,14 @@ class WakeWordService : Service() {
     }
 
     private fun stopAssistant() {
+        releaseWakeLock()
         _isServiceRunning.value = false
         _activeManager.value = null
+        _diagnostics.value = _diagnostics.value.copy(
+            isServiceAlive = false,
+            isRunning = false,
+            audioFps = 0.0
+        )
         wakeWordEngine.stop()
         speechRecognizerManager.destroy()
         speechOutput.release()
@@ -297,6 +347,9 @@ class WakeWordService : Service() {
 
         private val _isServiceRunning = MutableStateFlow(false)
         val isServiceRunning = _isServiceRunning.asStateFlow()
+
+        private val _diagnostics = MutableStateFlow(WakeWordDiagnostics())
+        val diagnostics: StateFlow<WakeWordDiagnostics> = _diagnostics.asStateFlow()
 
         private val _activeManager = MutableStateFlow<ConversationManager?>(null)
         val activeManager = _activeManager.asStateFlow()

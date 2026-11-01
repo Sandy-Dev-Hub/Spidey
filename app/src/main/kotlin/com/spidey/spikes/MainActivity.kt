@@ -1,6 +1,7 @@
 package com.spidey.spikes
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -14,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.spidey.assistant.ui.home.HomeScreen
+import com.spidey.assistant.voice.WakeWordService
 import com.spidey.spikes.spike1.WakeWordSpikeScreen
 import com.spidey.spikes.spike2.MicHandoffSpikeScreen
 import com.spidey.spikes.spike3.BgLaunchSpikeScreen
@@ -21,11 +24,6 @@ import com.spidey.spikes.spike4.UnlockSpikeScreen
 import com.spidey.spikes.spike5.CallSpikeScreen
 import com.spidey.spikes.spike6.ScreenOffSpikeScreen
 import com.spidey.spikes.util.SpikeLogger
-
-import com.spidey.assistant.ui.home.HomeScreen
-
-import android.content.pm.PackageManager
-import com.spidey.assistant.voice.WakeWordService
 
 class MainActivity : ComponentActivity() {
 
@@ -46,6 +44,11 @@ class MainActivity : ComponentActivity() {
         }
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissions(permissionsToRequest.toTypedArray(), 100)
+        } else {
+            // All base permissions granted: auto-start wake word service immediately
+            if (!WakeWordService.isServiceRunning.value) {
+                WakeWordService.start(this)
+            }
         }
 
         setContent {
@@ -59,7 +62,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Auto-start wake word service if mic permission is granted and service is not already running
+        // Ensure wake word service is continuously active
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             if (!WakeWordService.isServiceRunning.value) {
                 WakeWordService.start(this)
@@ -85,7 +88,7 @@ class MainActivity : ComponentActivity() {
 fun SpideyNavGraph() {
     val nav = rememberNavController()
     NavHost(navController = nav, startDestination = "home") {
-        composable("home")    {
+        composable("home") {
             HomeScreen(
                 onNavigateToSpikes = { nav.navigate("menu") },
                 onNavigateToAliases = { nav.navigate("aliases") }

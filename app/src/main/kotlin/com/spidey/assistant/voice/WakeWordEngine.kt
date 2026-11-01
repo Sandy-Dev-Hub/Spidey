@@ -1,18 +1,44 @@
 package com.spidey.assistant.voice
 
 import android.content.Context
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.os.SystemClock
 import android.util.Log
+import com.spidey.spikes.util.SpikeLogger
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
-import org.vosk.android.RecognitionListener
-import org.vosk.android.SpeechService
 import org.vosk.android.StorageService
 import java.io.IOException
+import java.util.Locale
+
+/**
+ * Diagnostics information exposed for the on-screen diagnostics panel
+ * and background reliability tracking.
+ */
+data class WakeWordDiagnostics(
+    val isServiceAlive: Boolean = false,
+    val isRunning: Boolean = false,
+    val isPaused: Boolean = false,
+    val audioFps: Double = 0.0,
+    val isSilenced: Boolean = false,
+    val detectionCount: Int = 0,
+    val lastWakeDetectionTime: Long = 0L,
+    val lastKeyword: String = "",
+    val error: String? = null
+)
 
 /**
  * On-device keyword spotter powered by offline Vosk Indian English engine.
- * Specifically detects "Hey Spider" and "Spider" triggers with zero network access.
+ * Specifically detects "Hey Spidey", "Spidey", "Hey Spider", and "Spider" triggers.
+ *
+ * Runs an explicit AudioRecord audio capture loop on a dedicated thread,
+ * computing real-time audio FPS and detecting OS-level mic silencing.
  */
 class WakeWordEngine(
     private val context: Context,
@@ -21,28 +47,44 @@ class WakeWordEngine(
     private val onError: (String) -> Unit = {}
 ) {
     private var model: Model? = null
-    private var speechService: SpeechService? = null
     private var recognizer: Recognizer? = null
+
+    @Volatile
     private var isListening = false
+
+    @Volatile
     private var isPaused = false
+
+    @Volatile
+    private var isRecording = false
+
+    private var recordThread: Thread? = null
+    private var audioRecord: AudioRecord? = null
+
+    private var detectionCount = 0
+
+    private val _diagnostics = MutableStateFlow(WakeWordDiagnostics())
+    val diagnostics: StateFlow<WakeWordDiagnostics> = _diagnostics.asStateFlow()
 
     init {
         loadModel()
     }
 
     private fun loadModel() {
+        SpikeLogger.log("SPIDEY", "Loading Vosk model-en-in from assets...")
         StorageService.unpack(
             context.applicationContext,
             "model-en-in",
             "model",
             { loadedModel: Model ->
                 model = loadedModel
-                Log.d(TAG, "Vosk model loaded successfully")
+                SpikeLogger.log("SPIDEY", "Vosk Indian English model loaded successfully")
                 onModelLoaded()
             },
             { exception: IOException ->
                 val err = "Failed to unpack Vosk model: ${exception.message}"
-                Log.e(TAG, err, exception)
+                SpikeLogger.log("SPIDEY", "Error: $err")
+                _diagnostics.value = _diagnostics.value.copy(error = err)
                 onError(err)
             }
         )
@@ -61,34 +103,154 @@ class WakeWordEngine(
         if (isListening && !isPaused) return
 
         try {
-            stopMicService()
+            stopAudioThreadAndReleaseRecord()
 
             // Initialize recognizer with 16kHz audio
-            val rec = Recognizer(currentModel, 16000.0f)
-            recognizer = rec
-
-            val service = SpeechService(rec, 16000.0f)
-            service.startListening(createListener(rec))
-            speechService = service
+            recognizer = Recognizer(currentModel, 16000.0f)
             isListening = true
             isPaused = false
-            Log.d(TAG, "WakeWordEngine started spotting")
+
+            startAudioLoop()
+            SpikeLogger.log("SPIDEY", "WakeWordEngine started listening loop")
         } catch (e: Exception) {
             val err = "Failed to start wake word engine: ${e.message}"
-            Log.e(TAG, err, e)
+            SpikeLogger.log("SPIDEY", "Error: $err")
+            _diagnostics.value = _diagnostics.value.copy(error = err)
             onError(err)
         }
     }
 
+    private fun startAudioLoop() {
+        val rec = recognizer ?: return
+        isRecording = true
+
+        val sampleRate = 16000
+        val channelConfig = AudioFormat.CHANNEL_IN_MONO
+        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+        val bufferSizeInShorts = maxOf(minBufferSize / 2, 3200) // 0.2s = 3200 shorts (5 fps nominal)
+
+        val record = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                sampleRate,
+                channelConfig,
+                audioFormat,
+                bufferSizeInShorts * 2
+            )
+        } catch (_: Exception) {
+            AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                sampleRate,
+                channelConfig,
+                audioFormat,
+                bufferSizeInShorts * 2
+            )
+        }
+
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            val err = "AudioRecord failed to initialize (state=${record.state}). Mic may be busy."
+            SpikeLogger.log("SPIDEY", "Error: $err")
+            _diagnostics.value = _diagnostics.value.copy(error = err, isSilenced = true)
+            record.release()
+            return
+        }
+
+        audioRecord = record
+
+        recordThread = Thread({
+            try {
+                record.startRecording()
+                val shortBuffer = ShortArray(bufferSizeInShorts)
+                var framesThisSec = 0
+                var lastFpsCheck = SystemClock.elapsedRealtime()
+
+                _diagnostics.value = _diagnostics.value.copy(
+                    isRunning = true,
+                    isPaused = false,
+                    isSilenced = false,
+                    error = null
+                )
+
+                while (isRecording && !isPaused) {
+                    val read = record.read(shortBuffer, 0, shortBuffer.size)
+                    if (read > 0) {
+                        framesThisSec++
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastFpsCheck >= 1000L) {
+                            val elapsedSec = (now - lastFpsCheck) / 1000.0
+                            val fps = if (elapsedSec > 0) framesThisSec / elapsedSec else 0.0
+                            framesThisSec = 0
+                            lastFpsCheck = now
+
+                            _diagnostics.value = _diagnostics.value.copy(
+                                audioFps = (fps * 10).toInt() / 10.0,
+                                isSilenced = false,
+                                isRunning = true
+                            )
+                        }
+
+                        val isFinal = rec.acceptWaveForm(shortBuffer, read)
+                        val jsonStr = if (isFinal) rec.result else rec.partialResult
+                        checkAndDispatchHypothesis(jsonStr, isFinal, rec)
+                    } else if (read == 0) {
+                        SystemClock.sleep(10)
+                    } else {
+                        Log.w(TAG, "AudioRecord.read returned error: $read")
+                        _diagnostics.value = _diagnostics.value.copy(
+                            isSilenced = true,
+                            error = "AudioRecord read error: $read"
+                        )
+                        SystemClock.sleep(100)
+                    }
+                }
+            } catch (e: Exception) {
+                if (isRecording) {
+                    SpikeLogger.log("SPIDEY", "Audio thread exception: ${e.message}")
+                    _diagnostics.value = _diagnostics.value.copy(error = e.message)
+                }
+            }
+        }, "SpideyWakeWordThread").apply {
+            priority = Thread.MAX_PRIORITY
+            start()
+        }
+    }
+
+    private fun checkAndDispatchHypothesis(jsonStr: String?, isFinal: Boolean, rec: Recognizer) {
+        if (jsonStr.isNullOrBlank() || isPaused) return
+        try {
+            val json = JSONObject(jsonStr)
+            val rawText = if (isFinal) json.optString("text", "") else json.optString("partial", "")
+            val text = rawText.trim()
+            if (text.isNotBlank() && isWakeWordMatch(text)) {
+                val now = System.currentTimeMillis()
+                SpikeLogger.log("SPIDEY", "⚡ Wake word detected: \"$text\" (isFinal=$isFinal)")
+                rec.reset()
+                detectionCount++
+                _diagnostics.value = _diagnostics.value.copy(
+                    detectionCount = detectionCount,
+                    lastWakeDetectionTime = now,
+                    lastKeyword = text
+                )
+                onWakeWordDetected()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "JSON parsing error: ${e.message}")
+        }
+    }
+
     /**
-     * Temporarily pauses wake spotting and releases the microphone for SpeechRecognizer or TTS.
+     * Temporarily pauses wake spotting and releases the microphone hardware
+     * so that SpeechRecognizer (command recognition) can record audio without conflicts.
      */
     @Synchronized
     fun pause() {
         if (!isListening) return
         isPaused = true
-        stopMicService()
-        Log.d(TAG, "WakeWordEngine paused and mic released")
+        isRecording = false
+        stopAudioThreadAndReleaseRecord()
+        _diagnostics.value = _diagnostics.value.copy(isPaused = true, audioFps = 0.0)
+        SpikeLogger.log("SPIDEY", "WakeWordEngine paused & mic released for speech input")
     }
 
     /**
@@ -97,7 +259,9 @@ class WakeWordEngine(
     @Synchronized
     fun resume() {
         if (isPaused) {
-            start()
+            isPaused = false
+            startAudioLoop()
+            SpikeLogger.log("SPIDEY", "WakeWordEngine resumed background spotting")
         }
     }
 
@@ -108,23 +272,37 @@ class WakeWordEngine(
     fun stop() {
         isListening = false
         isPaused = false
-        stopMicService()
-        Log.d(TAG, "WakeWordEngine fully stopped")
-    }
-
-    private fun stopMicService() {
+        isRecording = false
+        stopAudioThreadAndReleaseRecord()
         try {
-            speechService?.stop()
-            speechService?.shutdown()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error stopping SpeechService: ${e.message}")
-        }
-        speechService = null
+            recognizer?.close()
+        } catch (_: Exception) {}
         recognizer = null
+        _diagnostics.value = _diagnostics.value.copy(
+            isRunning = false,
+            isPaused = false,
+            audioFps = 0.0
+        )
+        SpikeLogger.log("SPIDEY", "WakeWordEngine fully stopped")
     }
 
-    private fun isWakeWordMatch(raw: String): Boolean {
-        val clean = raw.lowercase().replace(Regex("[^a-z0-9 ]"), " ")
+    private fun stopAudioThreadAndReleaseRecord() {
+        isRecording = false
+        try {
+            recordThread?.join(300)
+        } catch (_: Exception) {}
+        recordThread = null
+        try {
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing AudioRecord: ${e.message}")
+        }
+        audioRecord = null
+    }
+
+    fun isWakeWordMatch(raw: String): Boolean {
+        val clean = raw.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9 ]"), " ")
         val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
 
         val wakeKeywords = setOf(
@@ -138,59 +316,6 @@ class WakeWordEngine(
             return true
         }
         return false
-    }
-
-    private fun createListener(rec: Recognizer) = object : RecognitionListener {
-        override fun onPartialResult(hypothesis: String?) {
-            if (hypothesis.isNullOrBlank() || isPaused) return
-            try {
-                val json = JSONObject(hypothesis)
-                val partial = json.optString("partial", "").trim()
-                if (partial.isNotBlank() && isWakeWordMatch(partial)) {
-                    Log.d(TAG, "Wake word spotted in partial: \"$partial\"")
-                    rec.reset()
-                    onWakeWordDetected()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error parsing partial: ${e.message}")
-            }
-        }
-
-        override fun onResult(hypothesis: String?) {
-            if (hypothesis.isNullOrBlank() || isPaused) return
-            try {
-                val json = JSONObject(hypothesis)
-                val text = json.optString("text", "").trim()
-                if (text.isNotBlank() && isWakeWordMatch(text)) {
-                    Log.d(TAG, "Wake word spotted in result: \"$text\"")
-                    rec.reset()
-                    onWakeWordDetected()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error parsing result: ${e.message}")
-            }
-        }
-
-        override fun onFinalResult(hypothesis: String?) {
-            if (hypothesis.isNullOrBlank() || isPaused) return
-            try {
-                val json = JSONObject(hypothesis)
-                val text = json.optString("text", "").trim()
-                if (text.isNotBlank() && isWakeWordMatch(text)) {
-                    Log.d(TAG, "Wake word spotted in finalResult: \"$text\"")
-                    rec.reset()
-                    onWakeWordDetected()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error parsing finalResult: ${e.message}")
-            }
-        }
-
-        override fun onError(exception: java.lang.Exception?) {
-            Log.w(TAG, "Vosk RecognitionListener error: ${exception?.message}")
-        }
-
-        override fun onTimeout() {}
     }
 
     companion object {
