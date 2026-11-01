@@ -28,7 +28,8 @@ enum class AllowedApp(
     MESSAGES("Messages", "com.google.android.apps.messaging", listOf("sms", "message", "text")),
     GALLERY("Gallery", "com.sec.android.gallery3d", listOf("photos", "pictures")),
     CALCULATOR("Calculator", "com.sec.android.app.popupcalculator", listOf("calc")),
-    CLOCK("Clock", "com.sec.android.app.clockpackage", listOf("alarm", "timer"))
+    CLOCK("Clock", "com.sec.android.app.clockpackage", listOf("alarm", "timer")),
+    TELEGRAM("Telegram", "org.telegram.messenger", listOf("tg"))
 }
 
 /**

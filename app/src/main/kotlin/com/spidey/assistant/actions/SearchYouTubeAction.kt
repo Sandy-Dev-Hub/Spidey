@@ -44,7 +44,7 @@ class SearchYouTubeHandler(
                 setPackage("com.google.android.youtube")
                 putExtra("query", cleanQuery)
                 putExtra(android.app.SearchManager.QUERY, cleanQuery)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             try {
                 context.startActivity(intent)

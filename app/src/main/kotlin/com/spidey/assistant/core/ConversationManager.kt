@@ -48,6 +48,7 @@ class ConversationManager(
 
     private var isSessionActive = false
     private var sessionTimeoutJob: Job? = null
+    private var lastOpenedApp: String? = null
 
     private fun resetSessionTimeout() {
         if (followUpTimeoutMs <= 0L) return
@@ -64,6 +65,7 @@ class ConversationManager(
 
     private fun endSessionAndSleep() {
         isSessionActive = false
+        lastOpenedApp = null
         sessionTimeoutJob?.cancel()
         sessionTimeoutJob = null
         onStopSpeechListeningRequested()
@@ -127,8 +129,13 @@ class ConversationManager(
                 resetSessionTimeout()
                 _state.value = AssistantState.PROCESSING
 
-                val candidates = activeClarificationCandidates
+                val baseCandidates = activeClarificationCandidates
                 activeClarificationCandidates = emptyList()
+                val candidates = when {
+                    lastOpenedApp == "youtube" -> baseCandidates + "context:youtube"
+                    lastOpenedApp != null -> baseCandidates + "context:$lastOpenedApp"
+                    else -> baseCandidates
+                }
 
                 val action = intentEngine.parse(trimmed, candidates)
                 if (action != null) {
@@ -235,6 +242,16 @@ class ConversationManager(
     }
 
     private suspend fun executeAction(action: AssistantAction) {
+        if (action is com.spidey.assistant.actions.OpenAppAction) {
+            lastOpenedApp = if (action.appName.contains("youtube", ignoreCase = true) || (action.packageName?.contains("youtube", ignoreCase = true) == true)) {
+                "youtube"
+            } else {
+                action.appName.lowercase()
+            }
+        } else if (action is com.spidey.assistant.actions.SearchYouTubeAction) {
+            lastOpenedApp = "youtube"
+        }
+
         _state.value = AssistantState.EXECUTING
         when (val result = actionRouter.route(action)) {
             is ActionResult.Success -> {
@@ -323,6 +340,7 @@ class ConversationManager(
     private fun returnToSleeping() {
         activeClarificationCandidates = emptyList()
         emptySpeechAttempts = 0
+        lastOpenedApp = null
         _state.value = AssistantState.SLEEPING
         _errorText.value = null
         // Re-arm wake word spotter

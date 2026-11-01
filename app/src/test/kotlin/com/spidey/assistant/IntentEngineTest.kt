@@ -101,7 +101,8 @@ class IntentEngineTest {
             "open youtube and search for song magale from baththa movie" to "magale from baththa movie",
             "search for song magale from baththa movie" to "magale from baththa movie",
             "open youtube and search believer" to "believer",
-            "open youtube and play believer" to "believer"
+            "open youtube and play believer" to "believer",
+            "go to youtube and search for infinity war trailer" to "infinity war trailer"
         )
 
         for ((phrase, expectedQuery) in searchTestCases) {
@@ -216,6 +217,56 @@ class IntentEngineTest {
         val nameResult = intentEngine.parse("LiveWires", candidates)
         assertTrue(nameResult is FindContactAction)
         assertEquals("Guru Anna LiveWires", (nameResult as FindContactAction).query)
+    }
+
+    @Test
+    fun testYouTubeTrailerAndSearchContext() {
+        // "search for infinity war trailer"
+        val trailerAction = intentEngine.parse("search for infinity war trailer")
+        assertNotNull(trailerAction)
+        assertTrue(trailerAction is SearchYouTubeAction)
+        assertEquals("infinity war trailer", (trailerAction as SearchYouTubeAction).query)
+
+        // YouTube context follow-up query: "search avengers"
+        val contextSearchAction = intentEngine.parse("search avengers", listOf("context:youtube"))
+        assertNotNull(contextSearchAction)
+        assertTrue(contextSearchAction is SearchYouTubeAction)
+        assertEquals("avengers", (contextSearchAction as SearchYouTubeAction).query)
+
+        // YouTube context follow-up media title without 'search': "infinity war trailer"
+        val directTitleAction = intentEngine.parse("infinity war trailer", listOf("context:youtube"))
+        assertNotNull(directTitleAction)
+        assertTrue(directTitleAction is SearchYouTubeAction)
+        assertEquals("infinity war trailer", (directTitleAction as SearchYouTubeAction).query)
+    }
+
+    @Test
+    fun testTimeAndFeedbackIntents() {
+        val timeAction = intentEngine.parse("what is the time now")
+        assertNotNull(timeAction)
+        assertTrue(timeAction is com.spidey.assistant.actions.TimeAction)
+
+        val feedbackAction = intentEngine.parse("i m not see anything")
+        assertNotNull(feedbackAction)
+        assertTrue(feedbackAction is GreetingAction)
+    }
+
+    @Test
+    fun testTelegramAndOpenWith() {
+        val tgAction = intentEngine.parse("open telegram")
+        assertNotNull(tgAction)
+        assertTrue(tgAction is OpenAppAction)
+        assertEquals("Telegram", (tgAction as OpenAppAction).appName)
+
+        val openWithAction = intentEngine.parse("click open with youtube")
+        assertNotNull(openWithAction)
+        assertTrue(openWithAction is OpenAppAction)
+        assertEquals("YouTube", (openWithAction as OpenAppAction).appName)
+
+        val galleryAction = intentEngine.parse("gallery open the recent")
+        assertNotNull(galleryAction)
+        assertTrue(galleryAction is OpenAppAction)
+        assertEquals("Gallery", (galleryAction as OpenAppAction).appName)
     }
 
     @Test

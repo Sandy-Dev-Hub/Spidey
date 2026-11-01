@@ -21,6 +21,7 @@ import com.spidey.assistant.actions.GreetingHandler
 import com.spidey.assistant.actions.OpenAppHandler
 import com.spidey.assistant.actions.SearchYouTubeHandler
 import com.spidey.assistant.actions.StopHandler
+import com.spidey.assistant.actions.TimeHandler
 import com.spidey.assistant.calling.CallCoordinator
 import com.spidey.assistant.calling.CallingAccountRepository
 import com.spidey.assistant.contacts.ContactRepository
@@ -112,6 +113,7 @@ class WakeWordService : Service() {
         actionRouter = ActionRouter().apply {
             register(GreetingHandler())
             register(StopHandler())
+            register(TimeHandler())
             register(OpenAppHandler(this@WakeWordService))
             register(SearchYouTubeHandler(this@WakeWordService))
             register(FindContactHandler(contactRepository))
