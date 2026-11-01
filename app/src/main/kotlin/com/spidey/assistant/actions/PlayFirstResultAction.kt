@@ -42,11 +42,19 @@ class PlayFirstResultHandler(
             )
         }
 
-        val videoId = YouTubePlayerHelper.resolveFirstVideoId(targetQuery)
+        val videoId = YouTubePlayerHelper.resolveVideoId(targetQuery, action.itemIndex)
         return if (videoId != null) {
             val played = YouTubePlayerHelper.playVideo(context, videoId)
             if (played) {
-                ActionResult.Success(spokenMessage = "Playing the first result for $targetQuery.")
+                val ordinalWord = when (action.itemIndex) {
+                    1 -> "first"
+                    2 -> "second"
+                    3 -> "third"
+                    4 -> "fourth"
+                    5 -> "fifth"
+                    else -> "number ${action.itemIndex}"
+                }
+                ActionResult.Success(spokenMessage = "Playing the $ordinalWord result for $targetQuery.")
             } else {
                 ActionResult.Failure(
                     spokenMessage = "I found the video but could not start playback.",

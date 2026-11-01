@@ -14,7 +14,7 @@
 | Fix Round: Task 3 (Any App By Name) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 4 (Command Routing Fix) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 5 (YouTube Search & Play) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
-| **Fix Round: Task 6 (Supported Unlock Flow)** | **BUILT & INSTALLED ON DEVICE** | `phase-0-feasibility` | - |
+| Fix Round: Task 6 (Supported Unlock Flow) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 
 ---
 

@@ -80,12 +80,10 @@ class IntentEngine {
         }
 
         // 4. In-App commands (when foreground app is known and supports them)
-        // 4a. "play the first one" / "play first one" / "play the first video" / "play the first song"
-        if (isPlayFirstCommand(normalized)) {
-            return PlayFirstResultAction(
-                query = previousSearchQuery,
-                targetApp = "youtube"
-            )
+        // 4a. Play ordinal result ("play the first one", "play the third video on the search", "play 2nd video")
+        val playOrdinalAction = matchPlayOrdinal(normalized, previousSearchQuery, isYouTubeContext)
+        if (playOrdinalAction != null) {
+            return playOrdinalAction
         }
 
         // 4b. YouTube Search / Play intent
@@ -224,16 +222,90 @@ class IntentEngine {
         return clean in unlockPhrases
     }
 
-    private fun isPlayFirstCommand(text: String): Boolean {
-        val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
-        val playFirstPhrases = setOf(
-            "play the first one", "play first one", "play the first", "play first",
-            "play the first video", "play first video", "play the first result", "play first result",
-            "play the first song", "play first song", "play the 1st one", "play 1st one",
-            "play 1st video", "play the 1st video", "play the 1st result", "play 1st result",
-            "play the first track", "play first track", "play the first movie", "play first movie"
+    private fun matchPlayOrdinal(text: String, previousSearchQuery: String?, isYouTubeContext: Boolean): PlayFirstResultAction? {
+        var clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+
+        val searchSuffixes = listOf(
+            "on the search results", "in the search results", "from the search results",
+            "on the search", "in the search", "from the search",
+            "on search", "in search", "from search",
+            "on the list", "in the list", "from the list",
+            "on list", "in list"
         )
-        return clean in playFirstPhrases
+        for (suffix in searchSuffixes) {
+            if (clean.endsWith(" $suffix")) {
+                clean = clean.removeSuffix(" $suffix").trim()
+                break
+            }
+        }
+
+        val ordinalMap = mapOf(
+            "first" to 1, "1st" to 1, "one" to 1,
+            "second" to 2, "2nd" to 2, "two" to 2,
+            "third" to 3, "3rd" to 3, "three" to 3,
+            "fourth" to 4, "4th" to 4, "four" to 4,
+            "fifth" to 5, "5th" to 5, "five" to 5,
+            "sixth" to 6, "6th" to 6, "six" to 6,
+            "seventh" to 7, "7th" to 7, "seven" to 7,
+            "eighth" to 8, "8th" to 8, "eight" to 8,
+            "ninth" to 9, "9th" to 9, "nine" to 9,
+            "tenth" to 10, "10th" to 10, "ten" to 10
+        )
+
+        val digitMap = (1..10).associate { it.toString() to it }
+
+        val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+        if (!words.contains("play") && !clean.startsWith("open ") && !clean.startsWith("select ") && !clean.startsWith("choose ")) {
+            return null
+        }
+
+        if (!isYouTubeContext && previousSearchQuery.isNullOrBlank()) {
+            return null
+        }
+
+        val allowedStructuralWords = setOf(
+            "play", "open", "select", "choose", "the", "video", "song", "result", "track", "one", "movie",
+            "trailer", "item", "number", "no"
+        )
+
+        var matchedIndex: Int? = null
+
+        // 1. Check for "number <digit>"
+        for ((digitStr, index) in digitMap) {
+            if (clean.contains("number $digitStr") || clean.contains("no $digitStr") || clean.contains("item $digitStr")) {
+                matchedIndex = index
+                break
+            }
+        }
+
+        // 2. Check for ordinal words
+        if (matchedIndex == null) {
+            for ((word, index) in ordinalMap) {
+                if (words.contains(word)) {
+                    matchedIndex = index
+                    break
+                }
+            }
+        }
+
+        if (matchedIndex == null) return null
+
+        // 3. Strict guard: every word in clean must be either an allowed structural word or the matched ordinal/digit
+        val validWords = allowedStructuralWords + ordinalMap.keys + digitMap.keys
+        val allWordsValid = words.all { it in validWords }
+        if (!allWordsValid) {
+            return null
+        }
+
+        return PlayFirstResultAction(
+            query = previousSearchQuery,
+            targetApp = "youtube",
+            itemIndex = matchedIndex
+        )
+    }
+
+    private fun isPlayFirstCommand(text: String): Boolean {
+        return matchPlayOrdinal(text, null, true) != null
     }
 
     private fun isGreeting(text: String): Boolean {
