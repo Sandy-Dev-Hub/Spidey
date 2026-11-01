@@ -80,7 +80,7 @@ class IntentEngine {
         }
 
         // 4. In-App commands (when foreground app is known and supports them)
-        // 4a. "play the first one" / "play first one" / "play the first video"
+        // 4a. "play the first one" / "play first one" / "play the first video" / "play the first song"
         if (isPlayFirstCommand(normalized)) {
             return PlayFirstResultAction(
                 query = previousSearchQuery,
@@ -308,6 +308,8 @@ class IntentEngine {
             }
         }
 
+        val isPlay = clean.startsWith("play ") || clean.contains(" and play ") || clean.contains(" play ")
+
         // 1. Explicit YouTube search patterns including compound "open youtube and search..."
         val explicitPrefixes = listOf(
             "open youtube and search for song",
@@ -392,7 +394,8 @@ class IntentEngine {
                 query = query.removeSuffix(" on youtube").removeSuffix(" in youtube").trim()
                 val sanitized = sanitizeSearchQuery(query)
                 if (sanitized != null) {
-                    return SearchYouTubeAction(query = sanitized)
+                    val prefixIsPlay = isPlay || prefix.contains("play")
+                    return SearchYouTubeAction(query = sanitized, isPlayDirectly = prefixIsPlay)
                 }
             }
         }
@@ -401,15 +404,18 @@ class IntentEngine {
         if (clean.endsWith(" on youtube") || clean.endsWith(" in youtube")) {
             var trimmed = clean.removeSuffix(" on youtube").removeSuffix(" in youtube").trim()
             val leadingTriggers = listOf("search for", "search", "play", "find", "look for", "listen to")
+            var matchedTrigger: String? = null
             for (trigger in leadingTriggers) {
                 if (trimmed.startsWith("$trigger ")) {
+                    matchedTrigger = trigger
                     trimmed = trimmed.removePrefix("$trigger ").trim()
                     break
                 }
             }
             val sanitized = sanitizeSearchQuery(trimmed)
             if (sanitized != null) {
-                return SearchYouTubeAction(query = sanitized)
+                val triggerIsPlay = matchedTrigger == "play" || isPlay
+                return SearchYouTubeAction(query = sanitized, isPlayDirectly = triggerIsPlay)
             }
         }
 
@@ -438,7 +444,7 @@ class IntentEngine {
                     }
                     val sanitized = sanitizeSearchQuery(candidate)
                     if (sanitized != null) {
-                        return SearchYouTubeAction(query = sanitized)
+                        return SearchYouTubeAction(query = sanitized, isPlayDirectly = (trigger == "play" || isPlay))
                     }
                 }
             }
@@ -457,7 +463,7 @@ class IntentEngine {
                     val candidate = clean.removePrefix("$trigger ").trim()
                     val sanitized = sanitizeSearchQuery(candidate)
                     if (sanitized != null) {
-                        return SearchYouTubeAction(query = sanitized)
+                        return SearchYouTubeAction(query = sanitized, isPlayDirectly = (trigger.startsWith("play") || isPlay))
                     }
                 }
             }
@@ -466,7 +472,7 @@ class IntentEngine {
             if (queryWords.any { it in mediaKeywords }) {
                 val sanitized = sanitizeSearchQuery(clean)
                 if (sanitized != null) {
-                    return SearchYouTubeAction(query = sanitized)
+                    return SearchYouTubeAction(query = sanitized, isPlayDirectly = isPlay)
                 }
             }
         }
@@ -476,7 +482,7 @@ class IntentEngine {
             val query = clean.removePrefix("play ").trim()
             val sanitized = sanitizeSearchQuery(query)
             if (sanitized != null) {
-                return SearchYouTubeAction(query = sanitized)
+                return SearchYouTubeAction(query = sanitized, isPlayDirectly = true)
             }
         }
 

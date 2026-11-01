@@ -6,15 +6,19 @@ import android.content.Intent
 import android.net.Uri
 import com.spidey.assistant.core.ActionHandler
 import com.spidey.assistant.core.ActionResult
+import com.spidey.assistant.youtube.YouTubePlayerHelper
 import java.net.URLEncoder
 
 /**
  * Action representing a search query or song play on YouTube.
  */
-data class SearchYouTubeAction(val query: String) : AssistantAction
+data class SearchYouTubeAction(
+    val query: String,
+    val isPlayDirectly: Boolean = false
+) : AssistantAction
 
 /**
- * Handles [SearchYouTubeAction] by launching YouTube directly with search results or playback.
+ * Handles [SearchYouTubeAction] by searching or directly playing via YouTube.
  * Uses Android 15-compliant BackgroundAppLauncher routes.
  */
 class SearchYouTubeHandler(
@@ -41,6 +45,14 @@ class SearchYouTubeHandler(
         }
 
         return try {
+            if (action.isPlayDirectly) {
+                val videoId = YouTubePlayerHelper.resolveFirstVideoId(cleanQuery)
+                if (videoId != null && YouTubePlayerHelper.playVideo(context, videoId)) {
+                    return ActionResult.Success(spokenMessage = "Playing $cleanQuery on YouTube.")
+                }
+            }
+
+            // Standard search intent
             val intent = Intent(Intent.ACTION_SEARCH).apply {
                 setPackage("com.google.android.youtube")
                 putExtra("query", cleanQuery)
@@ -49,7 +61,6 @@ class SearchYouTubeHandler(
             }
             val launched = BackgroundAppLauncher.launch(context, intent)
             if (!launched) {
-                // If native YouTube app package is not available or direct launch failed, open in browser
                 val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
                 val webUri = Uri.parse("https://www.youtube.com/results?search_query=$encoded")
                 val webIntent = Intent(Intent.ACTION_VIEW, webUri).apply {

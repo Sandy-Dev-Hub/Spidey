@@ -128,7 +128,7 @@ class WakeWordService : Service() {
                 km?.isDeviceLocked == true
             })
             register(OpenAppHandler(this@WakeWordService))
-            register(PlayFirstResultHandler())
+            register(PlayFirstResultHandler(this@WakeWordService))
             register(SearchYouTubeHandler(this@WakeWordService))
             register(FindContactHandler(contactRepository))
             register(CallActionHandler(contactRepository, callingAccountRepository, callCoordinator, permManager))
