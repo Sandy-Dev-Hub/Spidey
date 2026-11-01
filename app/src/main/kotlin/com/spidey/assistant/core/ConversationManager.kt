@@ -67,8 +67,8 @@ class ConversationManager(
                 // 2. Play acoustic prompt cue (beep or tone)
                 playPromptSound()
 
-                // Short delay to ensure mic hardware finishes releasing and prompt tone sounds
-                kotlinx.coroutines.delay(200)
+                // Delay to ensure mic hardware finishes releasing and prompt tone sounds
+                kotlinx.coroutines.delay(350)
 
                 // 3. Start bounded speech recognition
                 onStartSpeechListeningRequested()
@@ -130,11 +130,18 @@ class ConversationManager(
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
 
-                // Error code 7 = ERROR_NO_MATCH, code 6 = ERROR_SPEECH_TIMEOUT
-                if (errorCode == 7 || errorCode == 6) {
+                // Transient / silence / timeout error codes:
+                // 1 = ERROR_NETWORK_TIMEOUT, 2 = ERROR_NETWORK, 3 = ERROR_AUDIO,
+                // 5 = ERROR_CLIENT, 6 = ERROR_SPEECH_TIMEOUT, 7 = ERROR_NO_MATCH,
+                // 8 = ERROR_RECOGNIZER_BUSY, 11 = ERROR_SERVER_DISCONNECTED
+                val isTransientOrSilence = errorCode in setOf(1, 2, 3, 5, 6, 7, 8, 11)
+
+                if (isTransientOrSilence && emptySpeechAttempts == 0) {
                     handleEmptySpeech()
                 } else {
-                    _errorText.value = "Speech recognition error: $errorMessage ($errorCode)"
+                    if (!isTransientOrSilence) {
+                        _errorText.value = "Speech recognition error: $errorMessage ($errorCode)"
+                    }
                     returnToSleeping()
                 }
             }
@@ -233,7 +240,9 @@ class ConversationManager(
 
     private fun returnToSleeping() {
         activeClarificationCandidates = emptyList()
+        emptySpeechAttempts = 0
         _state.value = AssistantState.SLEEPING
+        _errorText.value = null
         // Re-arm wake word spotter
         onWakeWordStateRequested(true)
     }

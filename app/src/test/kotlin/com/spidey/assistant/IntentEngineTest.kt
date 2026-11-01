@@ -4,6 +4,7 @@ import com.spidey.assistant.actions.AllowedApp
 import com.spidey.assistant.actions.FindContactAction
 import com.spidey.assistant.actions.GreetingAction
 import com.spidey.assistant.actions.OpenAppAction
+import com.spidey.assistant.actions.SearchYouTubeAction
 import com.spidey.assistant.core.IntentEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -59,6 +60,51 @@ class IntentEngineTest {
             assertNotNull("Phrase '$phrase' should produce an action", action)
             assertTrue("Phrase '$phrase' should produce OpenAppAction", action is OpenAppAction)
             assertEquals(AllowedApp.YOUTUBE, (action as OpenAppAction).app)
+        }
+    }
+
+    @Test
+    fun testOpenOtherAppsIntents() {
+        val appTestCases = listOf(
+            "open whatsapp" to ("WhatsApp" to AllowedApp.WHATSAPP),
+            "launch whatsapp" to ("WhatsApp" to AllowedApp.WHATSAPP),
+            "open chrome" to ("Chrome" to AllowedApp.CHROME),
+            "start chrome" to ("Chrome" to AllowedApp.CHROME),
+            "open camera" to ("Camera" to AllowedApp.CAMERA),
+            "open settings" to ("Settings" to AllowedApp.SETTINGS),
+            "open spotify" to ("Spotify" to AllowedApp.SPOTIFY),
+            "open instagram" to ("Instagram" to AllowedApp.INSTAGRAM),
+            "open maps" to ("Maps" to AllowedApp.MAPS),
+            "open calculator" to ("Calculator" to AllowedApp.CALCULATOR)
+        )
+
+        for ((phrase, expected) in appTestCases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' should produce OpenAppAction, got: $action", action is OpenAppAction)
+            val openApp = action as OpenAppAction
+            assertEquals(expected.first.lowercase(), openApp.appName.lowercase())
+            assertEquals(expected.second, openApp.app)
+        }
+    }
+
+    @Test
+    fun testYouTubeSearchIntents() {
+        val searchTestCases = listOf(
+            "go to search bar and search some song" to "some song",
+            "go to search bar and search believer" to "believer",
+            "search song shape of you on youtube" to "shape of you",
+            "search believer on youtube" to "believer",
+            "play believer on youtube" to "believer",
+            "play shape of you" to "shape of you",
+            "search on youtube faded" to "faded"
+        )
+
+        for ((phrase, expectedQuery) in searchTestCases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' should produce SearchYouTubeAction, got: $action", action is SearchYouTubeAction)
+            assertEquals(expectedQuery.lowercase(), (action as SearchYouTubeAction).query.lowercase())
         }
     }
 
