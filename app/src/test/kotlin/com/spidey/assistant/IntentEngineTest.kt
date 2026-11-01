@@ -97,7 +97,11 @@ class IntentEngineTest {
             "search believer on youtube" to "believer",
             "play believer on youtube" to "believer",
             "play shape of you" to "shape of you",
-            "search on youtube faded" to "faded"
+            "search on youtube faded" to "faded",
+            "open youtube and search for song magale from baththa movie" to "magale from baththa movie",
+            "search for song magale from baththa movie" to "magale from baththa movie",
+            "open youtube and search believer" to "believer",
+            "open youtube and play believer" to "believer"
         )
 
         for ((phrase, expectedQuery) in searchTestCases) {
@@ -105,6 +109,16 @@ class IntentEngineTest {
             assertNotNull("Phrase '$phrase' should produce an action", action)
             assertTrue("Phrase '$phrase' should produce SearchYouTubeAction, got: $action", action is SearchYouTubeAction)
             assertEquals(expectedQuery.lowercase(), (action as SearchYouTubeAction).query.lowercase())
+        }
+    }
+
+    @Test
+    fun testStopIntents() {
+        val stopPhrases = listOf("stop", "cancel", "bye", "goodbye", "sleep", "shut down", "go to sleep")
+        for (phrase in stopPhrases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' should produce StopAction, got: $action", action is com.spidey.assistant.actions.StopAction)
         }
     }
 

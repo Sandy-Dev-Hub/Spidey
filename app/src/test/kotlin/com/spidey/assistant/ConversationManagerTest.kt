@@ -175,4 +175,63 @@ class ConversationManagerTest {
         assertEquals(false, isSpeechListening)
         assertEquals(true, wakeWordState)
     }
+
+    @Test
+    fun testFollowUpModeEntersListeningAndTimesOut() = testScope.runTest {
+        val followUpManager = ConversationManager(
+            actionRouter = router,
+            intentEngine = intentEngine,
+            scope = testScope,
+            speak = { text, onDone ->
+                spokenMessages.add(text)
+                onDone()
+            },
+            playPromptSound = {},
+            onWakeWordStateRequested = { enabled -> wakeWordState = enabled },
+            onStartSpeechListeningRequested = { isSpeechListening = true },
+            onStopSpeechListeningRequested = { isSpeechListening = false },
+            followUpTimeoutMs = 5000L
+        )
+
+        followUpManager.onWakeWordDetected()
+        testScheduler.advanceTimeBy(400)
+        assertEquals(AssistantState.LISTENING, followUpManager.state.value)
+
+        // Speaks greeting
+        followUpManager.onSpeechRecognized("hello")
+        testScheduler.advanceTimeBy(300)
+        // In follow up mode, it enters LISTENING again without needing wake word!
+        assertEquals(AssistantState.LISTENING, followUpManager.state.value)
+
+        // Advance 5500ms past follow-up timeout
+        testScheduler.advanceTimeBy(5500)
+        assertEquals(AssistantState.SLEEPING, followUpManager.state.value)
+    }
+
+    @Test
+    fun testFollowUpModeStopExitsImmediately() = testScope.runTest {
+        router.register(com.spidey.assistant.actions.StopHandler())
+        val followUpManager = ConversationManager(
+            actionRouter = router,
+            intentEngine = intentEngine,
+            scope = testScope,
+            speak = { text, onDone ->
+                spokenMessages.add(text)
+                onDone()
+            },
+            playPromptSound = {},
+            onWakeWordStateRequested = { enabled -> wakeWordState = enabled },
+            onStartSpeechListeningRequested = { isSpeechListening = true },
+            onStopSpeechListeningRequested = { isSpeechListening = false },
+            followUpTimeoutMs = 30_000L
+        )
+
+        followUpManager.onWakeWordDetected()
+        testScheduler.advanceTimeBy(400)
+        assertEquals(AssistantState.LISTENING, followUpManager.state.value)
+
+        followUpManager.onSpeechRecognized("stop")
+        testScheduler.advanceTimeBy(300)
+        assertEquals(AssistantState.SLEEPING, followUpManager.state.value)
+    }
 }
