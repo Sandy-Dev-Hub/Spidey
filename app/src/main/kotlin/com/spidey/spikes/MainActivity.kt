@@ -50,13 +50,23 @@ class MainActivity : ComponentActivity() {
 fun SpideyNavGraph() {
     val nav = rememberNavController()
     NavHost(navController = nav, startDestination = "home") {
-        composable("home")   { HomeScreen(onNavigateToSpikes = { nav.navigate("menu") }) }
-        composable("menu")   { SpikeMenuScreen(nav) }
-        composable("spike1") { WakeWordSpikeScreen() }
-        composable("spike2") { MicHandoffSpikeScreen() }
-        composable("spike3") { BgLaunchSpikeScreen() }
-        composable("spike4") { UnlockSpikeScreen() }
-        composable("spike5") { CallSpikeScreen() }
-        composable("spike6") { ScreenOffSpikeScreen() }
+        composable("home")    {
+            HomeScreen(
+                onNavigateToSpikes = { nav.navigate("menu") },
+                onNavigateToAliases = { nav.navigate("aliases") }
+            )
+        }
+        composable("aliases") {
+            com.spidey.assistant.ui.settings.AliasSettingsScreen(
+                onNavigateBack = { nav.popBackStack() }
+            )
+        }
+        composable("menu")    { SpikeMenuScreen(nav) }
+        composable("spike1")  { WakeWordSpikeScreen() }
+        composable("spike2")  { MicHandoffSpikeScreen() }
+        composable("spike3")  { BgLaunchSpikeScreen() }
+        composable("spike4")  { UnlockSpikeScreen() }
+        composable("spike5")  { CallSpikeScreen() }
+        composable("spike6")  { ScreenOffSpikeScreen() }
     }
 }

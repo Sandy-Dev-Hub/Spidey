@@ -28,6 +28,9 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
 
+    <!-- ── Phase 2: Contact Search ────────────────────────────── -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
     <application
         android:name=".SpikeApp"
         android:allowBackup="false"

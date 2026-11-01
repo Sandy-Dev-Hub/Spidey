@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
 }
 
 // Read secrets from local.properties (gitignored – never committed)
@@ -90,6 +91,11 @@ dependencies {
     // ---- Vosk Offline Speech Recognition & Keyword Spotting ----------
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation("com.alphacephei:vosk-android:0.3.75@aar")
+
+    // ---- Room (Contact Aliases & Caching) ---------------------------
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
 
     // ---- Testing ---------------------------------------------------
     testImplementation("junit:junit:4.13.2")
