@@ -2,6 +2,8 @@ package com.spidey.assistant.unlock
 
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import com.spidey.assistant.actions.AssistantAction
 import com.spidey.spikes.util.SpikeLogger
@@ -19,6 +21,14 @@ object UnlockCoordinator {
     private var onUnlockFailedCallback: (() -> Unit)? = null
     private var pendingAction: PendingAction? = null
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val timeoutRunnable = Runnable {
+        if (_isAwaitingUnlock.value) {
+            SpikeLogger.log(TAG, "UnlockCoordinator: unlock timed out after 30s")
+            notifyUnlockCancelledOrFailed()
+        }
+    }
+
     private val _isAwaitingUnlock = MutableStateFlow(false)
     val isAwaitingUnlock = _isAwaitingUnlock.asStateFlow()
 
@@ -33,7 +43,10 @@ object UnlockCoordinator {
         onUnlockFailedCallback = onFailed
         _isAwaitingUnlock.value = true
 
-        SpikeLogger.log(TAG, "UnlockCoordinator: requestUnlock called for ${pendingAction::class.simpleName}")
+        mainHandler.removeCallbacks(timeoutRunnable)
+        mainHandler.postDelayed(timeoutRunnable, 30_000L)
+
+        SpikeLogger.log(TAG, "UnlockCoordinator: requestUnlock called for ${pendingAction::class.simpleName} (30s window started)")
 
         // 1. Physically turn the screen on using WakeLock
         try {
@@ -65,6 +78,7 @@ object UnlockCoordinator {
     internal fun notifyUnlockSuccess() {
         if (!_isAwaitingUnlock.value) return
         _isAwaitingUnlock.value = false
+        mainHandler.removeCallbacks(timeoutRunnable)
         SpikeLogger.log(TAG, "UnlockCoordinator: notifyUnlockSuccess called")
 
         val current = pendingAction
@@ -83,6 +97,7 @@ object UnlockCoordinator {
     internal fun notifyUnlockCancelledOrFailed() {
         if (!_isAwaitingUnlock.value) return
         _isAwaitingUnlock.value = false
+        mainHandler.removeCallbacks(timeoutRunnable)
         SpikeLogger.log(TAG, "UnlockCoordinator: notifyUnlockCancelledOrFailed called")
 
         pendingAction = null

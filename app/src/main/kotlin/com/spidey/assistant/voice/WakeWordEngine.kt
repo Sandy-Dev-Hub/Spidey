@@ -42,7 +42,7 @@ data class WakeWordDiagnostics(
  */
 class WakeWordEngine(
     private val context: Context,
-    private val onWakeWordDetected: () -> Unit,
+    private val onWakeWordDetected: (trailingCommand: String?) -> Unit,
     private val onModelLoaded: () -> Unit = {},
     private val onError: (String) -> Unit = {}
 ) {
@@ -224,7 +224,8 @@ class WakeWordEngine(
             val text = rawText.trim()
             if (text.isNotBlank() && isWakeWordMatch(text)) {
                 val now = System.currentTimeMillis()
-                SpikeLogger.log("SPIDEY", "⚡ Wake word detected: \"$text\" (isFinal=$isFinal)")
+                val trailing = extractTrailingCommand(text)
+                SpikeLogger.log("SPIDEY", "⚡ Wake word detected: \"$text\" (isFinal=$isFinal, trailing='$trailing')")
                 rec.reset()
                 detectionCount++
                 _diagnostics.value = _diagnostics.value.copy(
@@ -232,11 +233,29 @@ class WakeWordEngine(
                     lastWakeDetectionTime = now,
                     lastKeyword = text
                 )
-                onWakeWordDetected()
+                onWakeWordDetected(trailing)
             }
         } catch (e: Exception) {
             Log.w(TAG, "JSON parsing error: ${e.message}")
         }
+    }
+
+    fun extractTrailingCommand(text: String): String? {
+        val clean = text.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+        val wakeTriggers = listOf(
+            "hey spider", "hey spidey", "hi spider", "hi spidey", "hello spidey", "hello spider",
+            "a spider", "ok spider", "spider man", "spiderman", "spider", "spidey", "spidy", "spyder"
+        )
+        for (trigger in wakeTriggers) {
+            val idx = clean.indexOf(trigger)
+            if (idx != -1) {
+                val remainder = clean.substring(idx + trigger.length).trim()
+                if (remainder.isNotBlank() && remainder.length > 2) {
+                    return remainder
+                }
+            }
+        }
+        return null
     }
 
     /**
@@ -306,12 +325,15 @@ class WakeWordEngine(
         val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
 
         val wakeKeywords = setOf(
-            "spider", "spidey", "spidy", "spyder", "spydar", "spida", "speeder"
+            "spider", "spidey", "spidy", "spyder", "spydar", "spida", "speeder", "speedy",
+            "spide", "spidee", "friday", "priday", "spider man", "spiderman"
         )
 
         if (words.any { it in wakeKeywords }) return true
         if (clean.contains("spider") || clean.contains("spidey") || clean.contains("spyder") ||
-            clean.contains("spy der") || clean.contains("spy the") || clean.contains("hey speeder")
+            clean.contains("spidy") || clean.contains("spida") || clean.contains("speeder") ||
+            clean.contains("speedy") || clean.contains("spy der") || clean.contains("spy the") ||
+            clean.contains("hey speeder") || clean.contains("by the") || clean.contains("hey spider")
         ) {
             return true
         }

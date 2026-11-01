@@ -16,7 +16,7 @@ import android.util.Log
  */
 class SpeechRecognizerManager(
     private val context: Context,
-    private val onResult: (String) -> Unit,
+    private val onResult: (String, List<String>) -> Unit,
     private val onPartialResult: (String) -> Unit = {},
     private val onEmpty: () -> Unit,
     private val onError: (errorCode: Int, errorMessage: String) -> Unit,
@@ -55,9 +55,8 @@ class SpeechRecognizerManager(
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN")
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 }
 
                 hasSpeechStarted = false
@@ -164,14 +163,14 @@ class SpeechRecognizerManager(
         override fun onResults(results: Bundle?) {
             mainHandler.removeCallbacks(timeoutRunnable)
             isListening = false
-            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-            val recognizedText = matches?.firstOrNull()?.trim() ?: ""
-            Log.d(TAG, "SpeechRecognizer final results: \"$recognizedText\"")
+            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
+            val recognizedText = matches.firstOrNull()?.trim() ?: ""
+            Log.d(TAG, "SpeechRecognizer final results: \"$recognizedText\" (all: $matches)")
 
             if (recognizedText.isBlank()) {
                 onEmpty()
             } else {
-                onResult(recognizedText)
+                onResult(recognizedText, matches)
             }
         }
 

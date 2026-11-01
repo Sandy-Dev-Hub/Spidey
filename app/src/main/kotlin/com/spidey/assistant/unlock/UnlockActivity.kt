@@ -54,14 +54,16 @@ class UnlockActivity : Activity() {
             }
 
             override fun onDismissError() {
-                Log.w(TAG, "Keyguard dismiss error")
-                UnlockCoordinator.notifyUnlockCancelledOrFailed()
+                Log.w(TAG, "Keyguard dismiss error callback – keeping 30s unlock window active")
+                // On Samsung One UI, focus changes or transient auth attempts trigger this.
+                // Do not cancel coordinator; finish activity so the lockscreen bouncer has full control.
                 finish()
             }
 
             override fun onDismissCancelled() {
-                Log.i(TAG, "Keyguard dismiss cancelled by user")
-                UnlockCoordinator.notifyUnlockCancelledOrFailed()
+                Log.i(TAG, "Keyguard dismiss cancelled or bouncer shown – keeping 30s unlock window active")
+                // On Samsung One UI, onDismissCancelled is fired as soon as the bouncer takes foreground.
+                // Keep the 30s coordinator window alive waiting for ACTION_USER_PRESENT.
                 finish()
             }
         })

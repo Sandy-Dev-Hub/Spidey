@@ -77,8 +77,10 @@ class ConversationManager(
 
     /**
      * Called when the wake word is detected ("Hey Spider" / "Spider").
+     * If an inline command was spoken in the same breath (e.g. "hey spider unlock my phone"),
+     * it can execute immediately without waiting for a re-prompt.
      */
-    fun onWakeWordDetected() {
+    fun onWakeWordDetected(inlineCommand: String? = null) {
         scope.launch {
             mutex.withLock {
                 if (_state.value == AssistantState.PROCESSING ||
@@ -96,16 +98,37 @@ class ConversationManager(
 
                 emptySpeechAttempts = 0
                 _errorText.value = null
-                _state.value = AssistantState.LISTENING
 
                 // 1. Explicitly pause wake word to release mic
                 onWakeWordStateRequested(false)
+
+                // If user spoke the command in the same breath, try executing it immediately
+                if (!inlineCommand.isNullOrBlank()) {
+                    val baseCandidates = activeClarificationCandidates
+                    activeClarificationCandidates = emptyList()
+                    val candidates = mutableListOf<String>()
+                    candidates.addAll(baseCandidates)
+                    if (lastOpenedApp != null) {
+                        candidates.add(if (lastOpenedApp == "youtube") "context:youtube" else "context:$lastOpenedApp")
+                    }
+                    if (!lastSearchQuery.isNullOrBlank()) {
+                        candidates.add("query:$lastSearchQuery")
+                    }
+                    val action = intentEngine.parse(inlineCommand.trim(), candidates)
+                    if (action != null) {
+                        _lastHeardText.value = inlineCommand.trim()
+                        executeAction(action)
+                        return@withLock
+                    }
+                }
+
+                _state.value = AssistantState.LISTENING
 
                 // 2. Play acoustic prompt cue (beep or tone)
                 playPromptSound()
 
                 // Delay to ensure mic hardware finishes releasing and prompt tone sounds
-                kotlinx.coroutines.delay(350)
+                kotlinx.coroutines.delay(250)
 
                 // 3. Start bounded speech recognition
                 onStartSpeechListeningRequested()
@@ -116,7 +139,7 @@ class ConversationManager(
     /**
      * Called when the speech recognizer returns final recognized text.
      */
-    fun onSpeechRecognized(text: String) {
+    fun onSpeechRecognized(text: String, alternatives: List<String> = emptyList()) {
         scope.launch {
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
@@ -143,7 +166,20 @@ class ConversationManager(
                     candidates.add("query:$lastSearchQuery")
                 }
 
-                val action = intentEngine.parse(trimmed, candidates)
+                var action = intentEngine.parse(trimmed, candidates)
+                if (action == null && alternatives.isNotEmpty()) {
+                    for (alt in alternatives) {
+                        val altTrimmed = alt.trim()
+                        if (altTrimmed.isNotBlank() && !altTrimmed.equals(trimmed, ignoreCase = true)) {
+                            action = intentEngine.parse(altTrimmed, candidates)
+                            if (action != null) {
+                                _lastHeardText.value = altTrimmed
+                                break
+                            }
+                        }
+                    }
+                }
+
                 if (action != null) {
                     executeAction(action)
                 } else {
@@ -278,9 +314,12 @@ class ConversationManager(
                 } else {
                     action
                 }
+                _state.value = AssistantState.AWAITING_UNLOCK
                 onUnlockRequested(action)
                 speakResponse("Please enter your PIN or use your fingerprint.") {
-                    _state.value = AssistantState.AWAITING_UNLOCK
+                    if (pendingActionAfterUnlock != null) {
+                        _state.value = AssistantState.AWAITING_UNLOCK
+                    }
                 }
             }
             is ActionResult.Failure -> {

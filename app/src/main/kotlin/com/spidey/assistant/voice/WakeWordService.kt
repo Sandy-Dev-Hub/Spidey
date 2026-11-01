@@ -73,6 +73,7 @@ class WakeWordService : Service() {
             if (intent?.action == Intent.ACTION_USER_PRESENT) {
                 SpikeLogger.log("SPIDEY", "Received ACTION_USER_PRESENT broadcast")
                 UnlockCoordinator.notifyUnlockSuccess()
+                conversationManager.onDeviceUnlocked()
             }
         }
     }
@@ -159,17 +160,17 @@ class WakeWordService : Service() {
 
         speechRecognizerManager = SpeechRecognizerManager(
             context = this,
-            onResult = { text -> conversationManager.onSpeechRecognized(text) },
+            onResult = { text, matches -> conversationManager.onSpeechRecognized(text, matches) },
             onEmpty = { conversationManager.onSpeechEmpty() },
             onError = { code, msg -> conversationManager.onSpeechError(code, msg) }
         )
 
         wakeWordEngine = WakeWordEngine(
             context = this,
-            onWakeWordDetected = {
-                SpikeLogger.log("SPIDEY", "Wake word detected callback received! Ducking audio & starting conversation")
+            onWakeWordDetected = { trailingCommand ->
+                SpikeLogger.log("SPIDEY", "Wake word detected callback received! trailingCommand='$trailingCommand'")
                 requestDuckingAudioFocus()
-                conversationManager.onWakeWordDetected()
+                conversationManager.onWakeWordDetected(trailingCommand)
             },
             onModelLoaded = {
                 SpikeLogger.log("SPIDEY", "Vosk model ready in memory, starting wake word loop")

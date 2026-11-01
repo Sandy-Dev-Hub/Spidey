@@ -210,9 +210,16 @@ class IntentEngine {
 
     private fun isUnlockCommand(text: String): Boolean {
         val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+        if (clean == "unlock" || clean.startsWith("unlock ") || clean.endsWith(" unlock") || clean.contains(" unlock ")) {
+            if (clean.contains("phone") || clean.contains("mobile") || clean.contains("device") || clean.contains("screen") || clean == "unlock") {
+                return true
+            }
+        }
         val unlockPhrases = setOf(
             "unlock my phone", "unlock the phone", "unlock phone", "unlock",
-            "please unlock my phone", "please unlock the phone", "unlock device"
+            "please unlock my phone", "please unlock the phone", "unlock device",
+            "unlock my mobile", "unlock the mobile", "unlock mobile",
+            "unlock the screen", "unlock screen", "unlock it", "open my phone", "open phone"
         )
         return clean in unlockPhrases
     }
