@@ -69,6 +69,20 @@
                 android:value="SPIDEY Phase-0 feasibility spikes – background launch, unlock, and screen-off tests" />
         </service>
 
+        <!-- ── Phase 1: Assistant Unlock Activity ───────────────────── -->
+        <activity
+            android:name="com.spidey.assistant.unlock.UnlockActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- ── Phase 1: Assistant WakeWordService ─────────────────────── -->
+        <service
+            android:name="com.spidey.assistant.voice.WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
     </application>
 
     <!-- ── App install packages that may be queried ──────── -->

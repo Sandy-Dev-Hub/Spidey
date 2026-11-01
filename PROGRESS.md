@@ -5,13 +5,37 @@
 | Phase | Status | Branch | Tag |
 |-------|--------|--------|-----|
 | Phase 0 - Feasibility | **DONE** | `main` | `phase-0-done` |
-| Phase 1 - Voice Foundation | **IN PROGRESS** | `phase-1-voice` | - |
-| Phase 2 - Contact Search | WAITING | - | - |
+| Phase 1 - Voice Foundation | **VERIFIED ON DEVICE** | `phase-1-voice` | `phase-1-done` |
+| Phase 2 - Contact Search | NEXT UP | `phase-2-contacts` | - |
 | Phase 3 - Calling and SIM | WAITING | - | - |
 | Phase 4 - AI Understanding | WAITING | - | - |
 | Phase 5 - Multi-App Actions | WAITING | - | - |
 | Phase 6 - Background Reliability | WAITING | - | - |
 | Phase 7 - Security and Release | WAITING | - | - |
+
+---
+
+## Phase 1 - Voice Foundation
+
+**Goal:** The core loop works reliably: "Hey Spider" → prompt → you speak → SPIDEY answers by voice → back to listening. Only harmless commands.
+
+**Started:** 2026-10-30  
+**Completed:** 2026-10-30  
+
+### Implementation Deliverables
+- [x] **Frozen Contracts:** `AssistantState`, `AssistantAction`, `ActionResult`, `ActionHandler` in `com.spidey.assistant`.
+- [x] **ConversationManager:** Authoritative thread-safe state machine (`StateFlow`) coordinating the voice lifecycle.
+- [x] **WakeWordService:** Foreground microphone service with ongoing notification and Stop button.
+- [x] **Mic Handoff:** Clean state transition: pause wake engine, release mic, beep cue, listen (`en-IN`), re-arm wake engine.
+- [x] **SpeechRecognizerManager:** Bounded listening (`en-IN`) with silence timeout watchdog and fresh session lifecycle.
+- [x] **SpeechOutput:** Android TTS with self-trigger suppression.
+- [x] **IntentEngine v1:** Local rules for "hello" (`GreetingAction`) and "open youtube" (`OpenAppAction`).
+- [x] **ActionRouter:** Type-safe handler registry rejecting unknown actions.
+- [x] **Handlers:** `GreetingHandler`, `OpenAppHandler` with `AllowedApp.YOUTUBE` allowlist.
+- [x] **Compose Home Screen:** Dynamic state badge, live transcript cards, Start/Stop toggle, permissions status, spikes navigation.
+- [x] **Unlock Skeleton:** `UnlockCoordinator` and transparent `UnlockActivity` for keyguard dismissal on locked devices.
+- [x] **Unit Tests:** 12 tests passing across `IntentEngineTest`, `ActionRouterTest`, and `ConversationManagerTest`.
+- [x] **Phone Verification:** Verified live on Samsung Galaxy A14 5G. Spoken "Hey Spider" → "open YouTube" captured and launched successfully.
 
 ---
 
