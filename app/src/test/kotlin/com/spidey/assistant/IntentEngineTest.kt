@@ -285,4 +285,50 @@ class IntentEngineTest {
             assertNull("Phrase '$phrase' should return null", action)
         }
     }
+
+    @Test
+    fun testOpenAppAlwaysWinsOverYouTubeSearchContext() {
+        val ytContext = listOf("context:youtube")
+
+        // 1. In YouTube context, "open whatsapp" MUST be OpenAppAction, NEVER search
+        val openWhatsApp = intentEngine.parse("open whatsapp", ytContext)
+        assertNotNull(openWhatsApp)
+        assertTrue("Expected OpenAppAction but got $openWhatsApp", openWhatsApp is OpenAppAction)
+        assertEquals("WhatsApp", (openWhatsApp as OpenAppAction).appName)
+
+        // 2. "go to whatsapp" in YouTube context
+        val goToWhatsApp = intentEngine.parse("go to whatsapp", ytContext)
+        assertNotNull(goToWhatsApp)
+        assertTrue("Expected OpenAppAction but got $goToWhatsApp", goToWhatsApp is OpenAppAction)
+        assertEquals("WhatsApp", (goToWhatsApp as OpenAppAction).appName)
+
+        // 3. "open contacts" in YouTube context
+        val openContacts = intentEngine.parse("open contacts", ytContext)
+        assertNotNull(openContacts)
+        assertTrue("Expected OpenAppAction but got $openContacts", openContacts is OpenAppAction)
+        assertEquals("Contacts", (openContacts as OpenAppAction).appName)
+
+        // 4. "go to chrome" in YouTube context
+        val goToChrome = intentEngine.parse("go to chrome", ytContext)
+        assertNotNull(goToChrome)
+        assertTrue("Expected OpenAppAction but got $goToChrome", goToChrome is OpenAppAction)
+        assertEquals("Chrome", (goToChrome as OpenAppAction).appName)
+
+        // 5. In YouTube context, explicit search searches YouTube
+        val searchSong = intentEngine.parse("search jailer 2 song", ytContext)
+        assertNotNull(searchSong)
+        assertTrue("Expected SearchYouTubeAction but got $searchSong", searchSong is SearchYouTubeAction)
+        assertEquals("jailer 2 song", (searchSong as SearchYouTubeAction).query)
+
+        // 6. Assert no phrase starting with open/launch/go to verb produces a search action
+        val openVerbsPhrases = listOf(
+            "open whatsapp", "go to whatsapp", "launch whatsapp", "switch to whatsapp",
+            "open chrome", "go to chrome", "launch chrome", "open contacts", "go to contacts"
+        )
+        for (phrase in openVerbsPhrases) {
+            val action = intentEngine.parse(phrase, ytContext)
+            assertTrue("Phrase '$phrase' should never produce SearchYouTubeAction", action !is SearchYouTubeAction)
+            assertTrue("Phrase '$phrase' should produce OpenAppAction", action is OpenAppAction)
+        }
+    }
 }

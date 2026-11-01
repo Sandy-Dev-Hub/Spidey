@@ -54,16 +54,17 @@ class IntentEngine {
             return GreetingAction(queryText = text)
         }
 
-        // 6. Check for YouTube Search / Play intent
-        val ytSearchAction = matchYouTubeSearch(normalized, isYouTubeContext)
-        if (ytSearchAction != null) {
-            return ytSearchAction
-        }
-
-        // 7. Check for Open App intent (e.g. "open whatsapp", "open chrome", "open telegram")
+        // 6. Check for Open App intent (ALWAYS WINS OVER IN-APP SEARCH)
+        // E.g. "open whatsapp", "go to whatsapp", "open contacts", "launch chrome"
         val openAppAction = matchOpenApp(normalized)
         if (openAppAction != null) {
             return openAppAction
+        }
+
+        // 7. Check for YouTube Search / Play intent
+        val ytSearchAction = matchYouTubeSearch(normalized, isYouTubeContext)
+        if (ytSearchAction != null) {
+            return ytSearchAction
         }
 
         // 8. Check for Calling intent (Phase 3)
@@ -212,6 +213,24 @@ class IntentEngine {
     private fun matchYouTubeSearch(text: String, isYouTubeContext: Boolean = false): AssistantAction? {
         val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
 
+        // Safety: Never route phrases starting with open/launch verbs into a search query
+        // unless it is an explicit compound pattern like "open youtube and search..."
+        val openVerbs = listOf("open ", "go to ", "launch ", "switch to ", "start ")
+        if (openVerbs.any { clean.startsWith(it) }) {
+            val isExplicitCompoundSearch = clean.startsWith("open youtube and search") ||
+                clean.startsWith("go to youtube and search") ||
+                clean.startsWith("open youtube search") ||
+                clean.startsWith("go to youtube search") ||
+                clean.startsWith("open youtube and play") ||
+                clean.startsWith("go to youtube and play") ||
+                clean.startsWith("open youtube play") ||
+                clean.startsWith("go to youtube play") ||
+                clean.startsWith("go to search bar")
+            if (!isExplicitCompoundSearch) {
+                return null
+            }
+        }
+
         // 1. Explicit YouTube search patterns including compound "open youtube and search..."
         val explicitPrefixes = listOf(
             "open youtube and search for song",
@@ -345,12 +364,13 @@ class IntentEngine {
             }
         }
 
-        // 4. In YouTube Context (user just opened YouTube): ANY search/find/play query routes to YouTube!
+        // 4. In YouTube Context: explicit search/find/play query routes to YouTube
         if (isYouTubeContext) {
             val searchTriggers = listOf(
                 "go to search bar and search for", "go to search bar and search",
                 "search bar and search for", "search bar and search", "search bar search for", "search bar search",
-                "search for", "search", "find", "look for", "play", "listen to"
+                "search for song", "search for the song", "search for trailer", "search for video",
+                "search for", "search", "find", "look for", "play song", "play the song", "play", "listen to"
             )
             for (trigger in searchTriggers) {
                 if (clean.startsWith("$trigger ")) {
@@ -360,9 +380,9 @@ class IntentEngine {
                     }
                 }
             }
-            // If user simply speaks a media or video title (e.g. "infinity war trailer", "magale song", "avengers") while in YouTube
-            val nonQueryWords = setOf("stop", "sleep", "bye", "cancel", "exit", "quit", "hello", "hi", "hey", "back", "home")
-            if (clean !in nonQueryWords && clean.isNotBlank()) {
+            // Media queries with specific keywords (trailer, song, video, etc.) in YouTube context
+            val queryWords = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+            if (queryWords.any { it in mediaKeywords }) {
                 return SearchYouTubeAction(query = clean)
             }
         }
@@ -383,18 +403,24 @@ class IntentEngine {
         val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
         if (words.isEmpty()) return null
 
+        if (clean == "play youtube") {
+            return OpenAppAction(AllowedApp.YOUTUBE)
+        }
+
         val appTriggers = listOf(
             "click open with", "click open", "open with", "open up", "open", "launch",
-            "start", "play", "go to", "show", "run", "click on", "switch to"
+            "start", "go to", "show", "run", "click on", "switch to"
         )
 
         var appName: String? = null
+
+        val nonAppPrefixes = listOf("search bar", "search", "play", "find", "look for", "listen to", "call")
 
         // Check if starts with a trigger
         for (trigger in appTriggers) {
             if (clean.startsWith("$trigger ")) {
                 val candidate = clean.removePrefix("$trigger ").trim()
-                if (candidate.isNotBlank()) {
+                if (candidate.isNotBlank() && nonAppPrefixes.none { candidate.startsWith(it) }) {
                     appName = candidate
                     break
                 }
@@ -442,8 +468,15 @@ class IntentEngine {
 
             return if (matchedAllowed != null) {
                 OpenAppAction(appName = matchedAllowed.displayName, packageName = matchedAllowed.packageName)
+            } else if (clean.startsWith("open ") || clean.startsWith("launch ") || clean.startsWith("go to ") || clean.startsWith("switch to ")) {
+                val appWords = appName.split("\\s+".toRegex()).filter { it.isNotBlank() }
+                if (appWords.size <= 3 && !appName.contains(" on ") && !appName.contains(" in ")) {
+                    OpenAppAction(appName = appName)
+                } else {
+                    null
+                }
             } else {
-                OpenAppAction(appName = appName)
+                null
             }
         }
 

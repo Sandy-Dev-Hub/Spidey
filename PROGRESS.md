@@ -28,6 +28,7 @@
 - [x] **Route Analysis & Exemption (`BackgroundAppLauncher.kt`):** Implemented Android 15 BAL-exempt launching using `PendingIntent` with `MODE_BACKGROUND_ACTIVITY_START_ALLOWED` backed by `SYSTEM_ALERT_WINDOW` permission.
 - [x] **Foreground Verification (`ForegroundAppVerifier` via `UsageStatsManager`):** Queries recent `ACTIVITY_RESUMED` events to verify target package reached foreground before reporting success.
 - [x] **Eliminated False-Success (`OpenAppAction.kt`):** If target app is verified within 1.5s, announces `"Opening [App]."`; if unverified, honestly announces `"I sent the request to open [App], but can't confirm it worked."`
+- [x] **Routing Priority Fix (`IntentEngine.kt`):** In-app search (YouTube) no longer captures app open commands. `matchOpenApp` prioritised before `matchYouTubeSearch`, explicit open verbs guarded from search fallback.
 - [x] **Permissions Card Expansion (`HomeScreen.kt`):** Added quick status toggles for `Appear on top (SYSTEM_ALERT_WINDOW)` and `Usage Access (GET_USAGE_STATS)`.
 - [x] **Device Verified:** Permissions granted via adb, built, installed on Samsung Galaxy A14 5G.
 
