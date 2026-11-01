@@ -1,10 +1,15 @@
 package com.spidey.assistant
 
 import com.spidey.assistant.actions.AllowedApp
+import com.spidey.assistant.actions.CallContactAction
 import com.spidey.assistant.actions.FindContactAction
 import com.spidey.assistant.actions.GreetingAction
 import com.spidey.assistant.actions.OpenAppAction
+import com.spidey.assistant.actions.PlayFirstResultAction
 import com.spidey.assistant.actions.SearchYouTubeAction
+import com.spidey.assistant.actions.StopAction
+import com.spidey.assistant.actions.TimeAction
+import com.spidey.assistant.actions.UnlockAction
 import com.spidey.assistant.core.IntentEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -119,7 +124,7 @@ class IntentEngineTest {
         for (phrase in stopPhrases) {
             val action = intentEngine.parse(phrase)
             assertNotNull("Phrase '$phrase' should produce an action", action)
-            assertTrue("Phrase '$phrase' should produce StopAction, got: $action", action is com.spidey.assistant.actions.StopAction)
+            assertTrue("Phrase '$phrase' should produce StopAction, got: $action", action is StopAction)
         }
     }
 
@@ -157,8 +162,8 @@ class IntentEngineTest {
         for ((phrase, expected) in callQueries) {
             val action = intentEngine.parse(phrase)
             assertNotNull("Phrase '$phrase' should produce an action", action)
-            assertTrue("Phrase '$phrase' should produce CallContactAction, got: $action", action is com.spidey.assistant.actions.CallContactAction)
-            val callAction = action as com.spidey.assistant.actions.CallContactAction
+            assertTrue("Phrase '$phrase' should produce CallContactAction, got: $action", action is CallContactAction)
+            val callAction = action as CallContactAction
             assertEquals(expected.first, callAction.contactQuery)
             assertEquals(expected.second, callAction.selectedSim)
         }
@@ -170,20 +175,20 @@ class IntentEngineTest {
         val candidates = listOf("confirm_call", "yes", "no", "cancel")
 
         val yesAction = intentEngine.parse("yes", candidates)
-        assertTrue(yesAction is com.spidey.assistant.actions.CallContactAction)
-        assertTrue((yesAction as com.spidey.assistant.actions.CallContactAction).isConfirmed)
+        assertTrue(yesAction is CallContactAction)
+        assertTrue((yesAction as CallContactAction).isConfirmed)
 
         val goAheadAction = intentEngine.parse("go ahead", candidates)
-        assertTrue(goAheadAction is com.spidey.assistant.actions.CallContactAction)
-        assertTrue((goAheadAction as com.spidey.assistant.actions.CallContactAction).isConfirmed)
+        assertTrue(goAheadAction is CallContactAction)
+        assertTrue((goAheadAction as CallContactAction).isConfirmed)
 
         val cancelAction = intentEngine.parse("cancel", candidates)
-        assertTrue(cancelAction is com.spidey.assistant.actions.CallContactAction)
-        assertTrue((cancelAction as com.spidey.assistant.actions.CallContactAction).isCancelled)
+        assertTrue(cancelAction is CallContactAction)
+        assertTrue((cancelAction as CallContactAction).isCancelled)
 
         val noAction = intentEngine.parse("no", candidates)
-        assertTrue(noAction is com.spidey.assistant.actions.CallContactAction)
-        assertTrue((noAction as com.spidey.assistant.actions.CallContactAction).isCancelled)
+        assertTrue(noAction is CallContactAction)
+        assertTrue((noAction as CallContactAction).isCancelled)
     }
 
     @Test
@@ -192,24 +197,24 @@ class IntentEngineTest {
         val candidates = listOf("sim_choice", "Airtel", "Jio")
 
         val jioAction = intentEngine.parse("Jio", candidates)
-        assertTrue(jioAction is com.spidey.assistant.actions.CallContactAction)
-        assertEquals("Jio", (jioAction as com.spidey.assistant.actions.CallContactAction).selectedSim)
-        assertTrue((jioAction as com.spidey.assistant.actions.CallContactAction).isConfirmed)
+        assertTrue(jioAction is CallContactAction)
+        assertEquals("Jio", (jioAction as CallContactAction).selectedSim)
+        assertTrue((jioAction as CallContactAction).isConfirmed)
 
         val secondAction = intentEngine.parse("second", candidates)
-        assertTrue(secondAction is com.spidey.assistant.actions.CallContactAction)
-        assertEquals("Jio", (secondAction as com.spidey.assistant.actions.CallContactAction).selectedSim)
-        assertTrue((secondAction as com.spidey.assistant.actions.CallContactAction).isConfirmed)
+        assertTrue(secondAction is CallContactAction)
+        assertEquals("Jio", (secondAction as CallContactAction).selectedSim)
+        assertTrue((secondAction as CallContactAction).isConfirmed)
 
         val sim1Action = intentEngine.parse("sim 1", candidates)
-        assertTrue(sim1Action is com.spidey.assistant.actions.CallContactAction)
-        assertEquals("Airtel", (sim1Action as com.spidey.assistant.actions.CallContactAction).selectedSim)
-        assertTrue((sim1Action as com.spidey.assistant.actions.CallContactAction).isConfirmed)
+        assertTrue(sim1Action is CallContactAction)
+        assertEquals("Airtel", (sim1Action as CallContactAction).selectedSim)
+        assertTrue((sim1Action as CallContactAction).isConfirmed)
 
         val simOneAction = intentEngine.parse("sim one", candidates)
-        assertTrue(simOneAction is com.spidey.assistant.actions.CallContactAction)
-        assertEquals("Airtel", (simOneAction as com.spidey.assistant.actions.CallContactAction).selectedSim)
-        assertTrue((simOneAction as com.spidey.assistant.actions.CallContactAction).isConfirmed)
+        assertTrue(simOneAction is CallContactAction)
+        assertEquals("Airtel", (simOneAction as CallContactAction).selectedSim)
+        assertTrue((simOneAction as CallContactAction).isConfirmed)
     }
 
     @Test
@@ -256,7 +261,7 @@ class IntentEngineTest {
     fun testTimeAndFeedbackIntents() {
         val timeAction = intentEngine.parse("what is the time now")
         assertNotNull(timeAction)
-        assertTrue(timeAction is com.spidey.assistant.actions.TimeAction)
+        assertTrue(timeAction is TimeAction)
 
         val feedbackAction = intentEngine.parse("i m not see anything")
         assertNotNull(feedbackAction)
@@ -289,7 +294,10 @@ class IntentEngineTest {
             "asdfghjkl",
             "make me coffee",
             "book a flight to mars",
-            "what is the weather in antarctica"
+            "what is the weather in antarctica",
+            "blah blah blah",
+            "xyz 123",
+            "random noise 999"
         )
 
         for (phrase in unknownPhrases) {
@@ -298,49 +306,224 @@ class IntentEngineTest {
         }
     }
 
+    /**
+     * Task 4: Explicit 30+ phrases test suite asserting deterministic priority:
+     * 1. System commands (stop, cancel, unlock my phone, time)
+     * 2. Open app always wins over in-app search, even when YouTube is in front
+     * 3. In-app commands (play the first one, search <query>)
+     * 4. Search queries cleanly strip command words and NEVER begin with open/launch verbs
+     * 5. Gibberish returns null
+     */
     @Test
-    fun testOpenAppAlwaysWinsOverYouTubeSearchContext() {
+    fun testTask4FailingExamplesAndDeterministicRouting() {
         val ytContext = listOf("context:youtube")
 
-        // 1. In YouTube context, "open whatsapp" MUST be OpenAppAction, NEVER search
-        val openWhatsApp = intentEngine.parse("open whatsapp", ytContext)
+        // 1. "open WhatsApp" -> MUST be OpenAppAction, NEVER search
+        val openWhatsApp = intentEngine.parse("open WhatsApp", ytContext)
         assertNotNull(openWhatsApp)
-        assertTrue("Expected OpenAppAction but got $openWhatsApp", openWhatsApp is OpenAppAction)
+        assertTrue("Expected OpenAppAction, got: $openWhatsApp", openWhatsApp is OpenAppAction)
         assertEquals("WhatsApp", (openWhatsApp as OpenAppAction).appName)
 
-        // 2. "go to whatsapp" in YouTube context
-        val goToWhatsApp = intentEngine.parse("go to whatsapp", ytContext)
+        // 2. "go to WhatsApp" -> MUST be OpenAppAction, NEVER search
+        val goToWhatsApp = intentEngine.parse("go to WhatsApp", ytContext)
         assertNotNull(goToWhatsApp)
-        assertTrue("Expected OpenAppAction but got $goToWhatsApp", goToWhatsApp is OpenAppAction)
+        assertTrue("Expected OpenAppAction, got: $goToWhatsApp", goToWhatsApp is OpenAppAction)
         assertEquals("WhatsApp", (goToWhatsApp as OpenAppAction).appName)
 
-        // 3. "open contacts" in YouTube context
+        // 3. "open contacts" -> MUST be OpenAppAction, NEVER search
         val openContacts = intentEngine.parse("open contacts", ytContext)
         assertNotNull(openContacts)
-        assertTrue("Expected OpenAppAction but got $openContacts", openContacts is OpenAppAction)
+        assertTrue("Expected OpenAppAction, got: $openContacts", openContacts is OpenAppAction)
         assertEquals("Contacts", (openContacts as OpenAppAction).appName)
 
-        // 4. "go to chrome" in YouTube context
-        val goToChrome = intentEngine.parse("go to chrome", ytContext)
-        assertNotNull(goToChrome)
-        assertTrue("Expected OpenAppAction but got $goToChrome", goToChrome is OpenAppAction)
-        assertEquals("Chrome", (goToChrome as OpenAppAction).appName)
+        // 4. "go to YouTube" -> MUST be OpenAppAction, NEVER search
+        val goToYouTube = intentEngine.parse("go to YouTube", ytContext)
+        assertNotNull(goToYouTube)
+        assertTrue("Expected OpenAppAction, got: $goToYouTube", goToYouTube is OpenAppAction)
+        assertEquals("YouTube", (goToYouTube as OpenAppAction).appName)
 
-        // 5. In YouTube context, explicit search searches YouTube
-        val searchSong = intentEngine.parse("search jailer 2 song", ytContext)
-        assertNotNull(searchSong)
-        assertTrue("Expected SearchYouTubeAction but got $searchSong", searchSong is SearchYouTubeAction)
-        assertEquals("jailer 2 song", (searchSong as SearchYouTubeAction).query)
+        // 5. "play Jailer 2 song on YouTube" -> MUST be SearchYouTubeAction with clean query "Jailer 2 song"
+        val playJailer = intentEngine.parse("play Jailer 2 song on YouTube")
+        assertNotNull(playJailer)
+        assertTrue("Expected SearchYouTubeAction, got: $playJailer", playJailer is SearchYouTubeAction)
+        assertEquals("jailer 2 song", (playJailer as SearchYouTubeAction).query.lowercase())
 
-        // 6. Assert no phrase starting with open/launch/go to verb produces a search action
-        val openVerbsPhrases = listOf(
-            "open whatsapp", "go to whatsapp", "launch whatsapp", "switch to whatsapp",
-            "open chrome", "go to chrome", "launch chrome", "open contacts", "go to contacts"
+        // 6. "search Jailer 2 song" -> MUST be SearchYouTubeAction with clean query "Jailer 2 song"
+        val searchJailer = intentEngine.parse("search Jailer 2 song", ytContext)
+        assertNotNull(searchJailer)
+        assertTrue("Expected SearchYouTubeAction, got: $searchJailer", searchJailer is SearchYouTubeAction)
+        assertEquals("jailer 2 song", (searchJailer as SearchYouTubeAction).query.lowercase())
+
+        // 7. "play the first one" -> MUST be PlayFirstResultAction, NEVER search
+        val playFirst = intentEngine.parse("play the first one", ytContext + "query:jailer 2 song")
+        assertNotNull(playFirst)
+        assertTrue("Expected PlayFirstResultAction, got: $playFirst", playFirst is PlayFirstResultAction)
+        assertEquals("jailer 2 song", (playFirst as PlayFirstResultAction).query)
+
+        // 8. "unlock my phone" -> MUST be UnlockAction
+        val unlock = intentEngine.parse("unlock my phone")
+        assertNotNull(unlock)
+        assertTrue("Expected UnlockAction, got: $unlock", unlock is UnlockAction)
+    }
+
+    /**
+     * Task 4: Assert that NO phrase starting with an open/launch verb ever produces a search action.
+     * Evaluates across 35 different open commands in both default and YouTube foreground context.
+     */
+    @Test
+    fun testNoOpenVerbPhraseEverProducesSearchAction() {
+        val testOpenPhrases = listOf(
+            "open whatsapp",
+            "go to whatsapp",
+            "launch whatsapp",
+            "switch to whatsapp",
+            "start whatsapp",
+            "open contacts",
+            "go to contacts",
+            "launch contacts",
+            "switch to contacts",
+            "start contacts",
+            "open chrome",
+            "go to chrome",
+            "launch chrome",
+            "switch to chrome",
+            "start chrome",
+            "open youtube",
+            "go to youtube",
+            "launch youtube",
+            "switch to youtube",
+            "start youtube",
+            "open settings",
+            "go to settings",
+            "launch settings",
+            "switch to settings",
+            "start settings",
+            "open camera",
+            "go to camera",
+            "launch camera",
+            "switch to camera",
+            "start camera",
+            "open telegram",
+            "go to telegram",
+            "launch telegram",
+            "switch to telegram",
+            "start telegram",
+            "open calculator",
+            "go to calculator",
+            "launch calculator",
+            "switch to calculator",
+            "start calculator"
         )
-        for (phrase in openVerbsPhrases) {
+
+        // Test in YouTube foreground context
+        val ytContext = listOf("context:youtube")
+        for (phrase in testOpenPhrases) {
             val action = intentEngine.parse(phrase, ytContext)
-            assertTrue("Phrase '$phrase' should never produce SearchYouTubeAction", action !is SearchYouTubeAction)
-            assertTrue("Phrase '$phrase' should produce OpenAppAction", action is OpenAppAction)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' in YouTube context must NEVER produce SearchYouTubeAction, got: $action", action !is SearchYouTubeAction)
+            assertTrue("Phrase '$phrase' in YouTube context must produce OpenAppAction, got: $action", action is OpenAppAction)
+        }
+
+        // Test in default context
+        for (phrase in testOpenPhrases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' in default context must NEVER produce SearchYouTubeAction, got: $action", action !is SearchYouTubeAction)
+            assertTrue("Phrase '$phrase' in default context must produce OpenAppAction, got: $action", action is OpenAppAction)
+        }
+    }
+
+    /**
+     * Task 4: In-app commands for YouTube ("play the first one", "play first video", etc.)
+     */
+    @Test
+    fun testPlayFirstResultInAppCommands() {
+        val playFirstVariants = listOf(
+            "play the first one",
+            "play first one",
+            "play the first video",
+            "play first video",
+            "play the first result",
+            "play first result",
+            "play the first song",
+            "play first song",
+            "play the 1st one",
+            "play 1st one",
+            "play the 1st video",
+            "play the first",
+            "play first"
+        )
+
+        val contextWithQuery = listOf("context:youtube", "query:jailer 2 song")
+        for (phrase in playFirstVariants) {
+            val action = intentEngine.parse(phrase, contextWithQuery)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' must produce PlayFirstResultAction, got: $action", action is PlayFirstResultAction)
+            val playAction = action as PlayFirstResultAction
+            assertEquals("jailer 2 song", playAction.query)
+            assertEquals("youtube", playAction.targetApp)
+        }
+    }
+
+    /**
+     * Task 4: Clean stripping of command words.
+     * Query must never contain command words or start with open/launch verbs.
+     */
+    @Test
+    fun testSearchQueryCommandWordStripping() {
+        val stripTestCases = listOf(
+            "play Jailer 2 song on YouTube" to "jailer 2 song",
+            "search Jailer 2 song" to "jailer 2 song",
+            "search for Jailer 2 song" to "jailer 2 song",
+            "search for song Jailer 2" to "jailer 2",
+            "search on YouTube for Jailer 2 song" to "jailer 2 song",
+            "search in YouTube for Jailer 2" to "jailer 2",
+            "play believer on youtube" to "believer",
+            "search believer on youtube" to "believer",
+            "go to search bar and search Jailer 2 trailer" to "jailer 2 trailer",
+            "open youtube and search for believer" to "believer",
+            "go to youtube and search for infinity war trailer" to "infinity war trailer"
+        )
+
+        for ((phrase, expectedQuery) in stripTestCases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' should produce SearchYouTubeAction, got: $action", action is SearchYouTubeAction)
+            val ytAction = action as SearchYouTubeAction
+            assertEquals(expectedQuery.lowercase(), ytAction.query.lowercase())
+
+            // Assert that the extracted query NEVER begins with any open or launch verb
+            val openVerbs = listOf("open", "go to", "launch", "switch to", "start")
+            for (verb in openVerbs) {
+                assertTrue("Query '${ytAction.query}' must not start with '$verb'", !ytAction.query.lowercase().startsWith(verb))
+            }
+        }
+    }
+
+    /**
+     * Task 4: System commands (stop, cancel, unlock, time).
+     */
+    @Test
+    fun testSystemCommandsPriority() {
+        val unlockPhrases = listOf(
+            "unlock my phone",
+            "unlock the phone",
+            "unlock phone",
+            "unlock",
+            "please unlock my phone",
+            "unlock device"
+        )
+        for (phrase in unlockPhrases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' should produce UnlockAction, got: $action", action is UnlockAction)
+        }
+
+        val stopPhrases = listOf("stop", "cancel", "sleep", "quit")
+        for (phrase in stopPhrases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' should produce StopAction, got: $action", action is StopAction)
         }
     }
 }

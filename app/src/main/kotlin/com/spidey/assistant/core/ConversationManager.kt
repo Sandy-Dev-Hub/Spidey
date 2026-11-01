@@ -49,6 +49,7 @@ class ConversationManager(
     private var isSessionActive = false
     private var sessionTimeoutJob: Job? = null
     private var lastOpenedApp: String? = null
+    private var lastSearchQuery: String? = null
 
     private fun resetSessionTimeout() {
         if (followUpTimeoutMs <= 0L) return
@@ -66,6 +67,7 @@ class ConversationManager(
     private fun endSessionAndSleep() {
         isSessionActive = false
         lastOpenedApp = null
+        lastSearchQuery = null
         sessionTimeoutJob?.cancel()
         sessionTimeoutJob = null
         onStopSpeechListeningRequested()
@@ -131,10 +133,13 @@ class ConversationManager(
 
                 val baseCandidates = activeClarificationCandidates
                 activeClarificationCandidates = emptyList()
-                val candidates = when {
-                    lastOpenedApp == "youtube" -> baseCandidates + "context:youtube"
-                    lastOpenedApp != null -> baseCandidates + "context:$lastOpenedApp"
-                    else -> baseCandidates
+                val candidates = mutableListOf<String>()
+                candidates.addAll(baseCandidates)
+                if (lastOpenedApp != null) {
+                    candidates.add(if (lastOpenedApp == "youtube") "context:youtube" else "context:$lastOpenedApp")
+                }
+                if (!lastSearchQuery.isNullOrBlank()) {
+                    candidates.add("query:$lastSearchQuery")
                 }
 
                 val action = intentEngine.parse(trimmed, candidates)
@@ -250,6 +255,9 @@ class ConversationManager(
             }
         } else if (action is com.spidey.assistant.actions.SearchYouTubeAction) {
             lastOpenedApp = "youtube"
+            lastSearchQuery = action.query
+        } else if (action is com.spidey.assistant.actions.PlayFirstResultAction) {
+            lastOpenedApp = action.targetApp
         }
 
         _state.value = AssistantState.EXECUTING
@@ -306,6 +314,7 @@ class ConversationManager(
     private fun enterFollowUpListening() {
         emptySpeechAttempts = 0
         _state.value = AssistantState.LISTENING
+        resetSessionTimeout()
         onWakeWordStateRequested(false)
         scope.launch {
             kotlinx.coroutines.delay(200)
@@ -348,6 +357,7 @@ class ConversationManager(
         activeClarificationCandidates = emptyList()
         emptySpeechAttempts = 0
         lastOpenedApp = null
+        lastSearchQuery = null
         _state.value = AssistantState.SLEEPING
         _errorText.value = null
         // Re-arm wake word spotter

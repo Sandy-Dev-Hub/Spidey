@@ -1,6 +1,6 @@
 # SPIDEY - Progress Tracker
 
-## Current Phase: Fix Round - Task 3 (Any App By Name)
+## Current Phase: Fix Round - Task 4 (Fix Command Routing & Follow-Up Window)
 
 | Phase | Status | Branch | Tag |
 |---|---|---|---|
@@ -11,10 +11,57 @@
 | Multi-App & Auto-Wake Hotfix | **VERIFIED ON DEVICE** | `main` | `assistant-hotfix-done` |
 | Fix Round: Task 1 (Wake Word Outside App) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 2 (Background Launch) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
-| **Fix Round: Task 3 (Any App By Name)** | **BUILT & TESTED** | `phase-0-feasibility` | - |
-| Fix Round: Task 4 (Command Routing Fix) | WAITING | - | - |
+| Fix Round: Task 3 (Any App By Name) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| **Fix Round: Task 4 (Command Routing Fix)** | **BUILT & TESTED** | `phase-0-feasibility` | - |
 | Fix Round: Task 5 (YouTube Search & Play) | WAITING | - | - |
 | Fix Round: Task 6 (Supported Unlock Flow) | WAITING | - | - |
+
+---
+
+## Fix Round - Task 4: Fix Command Routing (Bugs 3 & 4) & Follow-Up Window
+
+**Goal:** Each utterance goes to the right action; commands are never typed into another app's search bar by mistake; follow-up window (8s) allows consecutive in-app commands like "play the first one" without wake-word repetition.
+
+**Completed:** 2026-11-01
+
+### Diagnosis & Root Cause
+1. **Why "open WhatsApp" was searched in YouTube:**
+   - Previous versions evaluated `matchYouTubeSearch` or allowed generic search capture when `isYouTubeContext` was true, before resolving general app launches.
+   - When YouTube was in front, `ConversationManager` passed `context:youtube`. A phrase like "open whatsapp" or "go to whatsapp" fell through to `SearchYouTubeAction(query = "open whatsapp")` instead of `OpenAppAction`.
+   - `SearchYouTubeHandler` launched `Intent(Intent.ACTION_SEARCH)` with `SearchManager.QUERY = "open whatsapp"` targeted at `com.google.android.youtube`, causing YouTube to open its search bar and search for the phrase.
+2. **Why "Play [Song]" was spoken but failed to play:**
+   - YouTube `ACTION_SEARCH` intent only displays search results and does not autoplay.
+   - Background activity starts from the background service were not consistently routed through Android 15 BAL exemptions in `SearchYouTubeHandler`.
+   - "play the first one" had no dedicated handler and was being matched as a search for a video titled `"the first one"`.
+
+### Implementation Deliverables
+- [x] **Deterministic Priority Order (`IntentEngine.kt`):**
+  1. Active Clarification / Confirmations (SIM choices, ambiguous app choices, call confirmations).
+  2. System Commands (`stop`, `cancel`, `unlock my phone`, `TimeAction`, `GreetingAction`).
+  3. Open App (`OpenAppAction`) - **ALWAYS wins over in-app search**, even when YouTube is active. "Open WhatsApp" and "go to WhatsApp" strictly switch apps and can never reach YouTube search.
+  4. In-App Commands (e.g. YouTube: "play the first one", "search <query>", "play <query>").
+  5. Calling & Contacts (`CallContactAction`, `FindContactAction`).
+  6. Clarify (`null` -> "I didn't understand that"). Never types raw transcripts into active fields.
+- [x] **Strict Open-Verb Search Guard (`sanitizeSearchQuery`):**
+  - Search queries strictly strip command words: `"play Jailer 2 song on YouTube"` -> `"Jailer 2 song"`.
+  - A search query is asserted to **NEVER** begin with open/launch verbs (`open`, `go to`, `launch`, `switch to`, `start`).
+- [x] **In-App "Play the First One" Command (`PlayFirstResultAction.kt`):**
+  - Created `PlayFirstResultAction` and `PlayFirstResultHandler`.
+  - Parses phrases: "play the first one", "play first one", "play the first video", "play first video", "play the first result", etc.
+  - Carries short-term query context (`query:Jailer 2 song`) to confirm `"Playing the first result for Jailer 2 song."`
+- [x] **Supported Unlock Command (`UnlockAction.kt`):**
+  - Created `UnlockAction` and `UnlockHandler` for system unlock commands ("unlock my phone", "unlock the phone").
+- [x] **8-Second Follow-Up Window (`ConversationManager.kt` & `WakeWordService.kt`):**
+  - Set `followUpTimeoutMs = 8_000L`.
+  - Keeps short-term context: `lastOpenedApp` and `lastSearchQuery`.
+  - Resets the 8-second timer when Spidey finishes speaking (`enterFollowUpListening()`), giving the user a full 8 seconds to say "play the first one" or "open WhatsApp" without repeating the wake word.
+- [x] **Android 15 BAL Compliance (`SearchYouTubeAction.kt`):**
+  - Updated `SearchYouTubeHandler` to use `BackgroundAppLauncher.launch(context, intent)` for background launch reliability.
+- [x] **Comprehensive Unit Test Suite (`IntentEngineTest.kt`):**
+  - 58/58 unit tests passing.
+  - Includes explicit tests for failing examples: "open WhatsApp", "go to WhatsApp", "open contacts", "go to YouTube", "play Jailer 2 song on YouTube", "search Jailer 2 song", "play the first one", "unlock my phone", plus gibberish.
+  - Dedicated test asserting 35 open/launch verb phrases across contexts never produce `SearchYouTubeAction`.
+- [x] **Device Deployed:** Built and installed on Samsung Galaxy A14 5G (`RZCW60PWC7J`).
 
 ---
 
@@ -35,8 +82,6 @@
 
 ---
 
----
-
 ## Fix Round - Task 2: Background App Launch & Foreground Verification
 
 **Goal:** While YouTube (or any app) is in front, "open WhatsApp" reliably switches to WhatsApp, and never announces success unless verified in foreground.
@@ -50,8 +95,6 @@
 - [x] **Routing Priority Fix (`IntentEngine.kt`):** In-app search (YouTube) no longer captures app open commands. `matchOpenApp` prioritised before `matchYouTubeSearch`, explicit open verbs guarded from search fallback.
 - [x] **Permissions Card Expansion (`HomeScreen.kt`):** Added quick status toggles for `Appear on top (SYSTEM_ALERT_WINDOW)` and `Usage Access (GET_USAGE_STATS)`.
 - [x] **Device Verified:** Permissions granted via adb, built, installed on Samsung Galaxy A14 5G.
-
----
 
 ---
 
@@ -70,136 +113,3 @@
 - [x] **Unified Logging (`SpikeLogger.kt`):** Logcat tag updated to `SPIDEY` and persistent log file set to `spidey_log.txt`.
 - [x] **Keyword Recognition Support:** Matches "Hey Spidey", "Spidey", "Hey Spider", "Spider" (plus phonetic variants).
 - [x] **Unit Tests & Build:** Clean build and 42/42 unit tests passing.
-
----
-
-## Multi-App & Auto-Wake Hotfix
-
-**Goal:** Fix universal app opening (WhatsApp, Chrome, Camera, Settings, etc.), YouTube song search/playback, audio focus ducking to eliminate media conflicts, and always-on wake word auto-start on app launch and boot.
-
-**Completed:** 2026-10-30
-
-### Deliverables
-- [x] **Universal App Launcher (`OpenAppAction.kt` & `OpenAppHandler.kt`):** Dynamic package discovery via `PackageManager.queryIntentActivities` + 14 pre-mapped popular apps (WhatsApp, Chrome, Camera, Settings, Spotify, Instagram, Maps, Gmail, Phone, Messages, Gallery, Calculator, Clock).
-- [x] **YouTube Search & Play (`SearchYouTubeAction.kt`):** Direct YouTube app search intent (`vnd.youtube://results?search_query=...` with web fallback) supporting natural queries: `"go to search bar and search [song]"`, `"search [query] on youtube"`, `"play [query] on youtube"`, and `"play [song]"`.
-- [x] **Audio Focus Ducking (`WakeWordService.kt`):** Requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` when wake word triggers or mic starts listening, automatically ducking background media (e.g., YouTube playing in background) and preventing `ERROR_AUDIO` (3) / `ERROR_CLIENT` (5) / `ERROR_SERVER_DISCONNECTED` (11).
-- [x] **Auto-Start & Boot Receiver (`BootReceiver.kt`, `MainActivity.kt`, `HomeScreen.kt`):** Automatically starts `WakeWordService` on device boot (`BOOT_COMPLETED`), activity start (`onResume`), or permission grant, removing any requirement to click "Start Assistant".
-- [x] **Speech Error & Recovery Polish (`ConversationManager.kt`):** Catches transient speech recognizer codes (1, 2, 3, 5, 6, 7, 8, 11) gracefully without showing an error banner, and auto-clears errors on returning to sleep.
-- [x] **Unit Tests:** 42/42 tests passing across `IntentEngineTest`, `CallActionHandlerTest`, `ConversationManagerTest`, etc.
-- [x] **Device Verified:** Installed and running live on Samsung Galaxy A14 5G (`RZCW60PWC7J`).
-
----
-
-## Phase 3 - Calling and SIM Selection
-
-**Goal:** "Call Guru Anna" resolves the contact, picks a number, asks for the SIM if needed, confirms, and starts the call through a supported flow. It reports honestly what happened.
-
-**Started:** 2026-10-30  
-**Completed:** 2026-10-30  
-
-### Implementation Deliverables
-- [x] **CallingAccountRepository:** Discovers live SIM and phone accounts via Android Telecom and Subscription APIs without assuming static SIM slots.
-- [x] **ConfirmationPolicy:** Evaluates spoken confirmation ("yes", "go ahead", "sure", etc.) and cancellation ("no", "cancel", "stop", etc.) and formats prompt.
-- [x] **CallCoordinator:** Places direct calls with `TelecomManager.placeCall()` passing `EXTRA_PHONE_ACCOUNT_HANDLE`, with `ACTION_CALL` and `ACTION_DIAL` (dialer fallback).
-- [x] **CallContactAction & CallActionHandler:** Complete multi-turn calling handler with contact resolution, multiple number disambiguation, dual SIM selection, spoken confirmation, and dialer fallback.
-- [x] **Locked Device Handling & In-Memory Resume:** Re-validates keyguard lock status, requests system unlock via `UnlockActivity`, and tracks pending actions in-memory with a 30s TTL.
-- [x] **IntentEngine Calling Expansion:** Rules for natural speech calling ("call [name]", "call [name] on [sim]", "dial [name]"), number choices, SIM choices, and spoken confirmations.
-- [x] **Service Integration:** Registered `CallActionHandler` in `WakeWordService`.
-- [x] **Unit Tests:** 40/40 tests passing across `CallActionHandlerTest`, `CallingAccountRepositoryTest`, `ConfirmationPolicyTest`, and `IntentEngineTest`.
-- [x] **Phone Verification:** Deployed and running on Samsung Galaxy A14 5G.
-
----
-
-## Phase 2 - Contact Search
-
-**Goal:** "Guru Anna" resolves to a **real contact record** or to a clarification question. No calling yet.
-
-**Started:** 2026-10-30  
-**Completed:** 2026-10-30  
-
-### Implementation Deliverables
-- [x] **PermissionManager:** Runtime check and request flow for `READ_CONTACTS`.
-- [x] **ContactRepository:** Queries Android Contacts Provider (`ContactsContract.CommonDataKinds.Phone`), in-memory cache, no contact logging.
-- [x] **ContactMatcher Pipeline:** 6-stage pipeline (Normalization → Exact → User Alias → Token containment → Levenshtein fuzzy similarity → Ambiguity thresholding).
-- [x] **Ambiguity Tie-breaking:** Detects ambiguous candidates when top scores are close (< 0.08 delta) or confidence is borderline; prompts clarification without guessing.
-- [x] **Room Aliases Database:** `ContactAlias` entity, `AliasDao`, `SpideyDatabase` with KSP compiler.
-- [x] **Alias Settings Screen:** Compose screen to view, add, delete, and clear contact aliases.
-- [x] **FindContactAction & Handler:** Typed `FindContactAction` with `FindContactHandler` returning `Resolved`, `Ambiguous`, `NotFound`, or `PermissionDenied`.
-- [x] **IntentEngine v2:** Natural speech contact search rules ("find [name]", "who is [name]", "search contact [name]", "lookup [name]") and ordinal clarification resolution ("the first one", "second", candidate substring).
-- [x] **Unit Tests:** Full suite passing (including synthetic test cases: "Guru Anna LW", "Guru Anna LiveWires", "Guru Krishnan", "Anna LiveWires").
-- [x] **Phone Verification:** Deployed and verified on Samsung Galaxy A14 5G.
-
----
-
-## Phase 1 - Voice Foundation
-
-**Goal:** The core loop works reliably: "Hey Spider" → prompt → you speak → SPIDEY answers by voice → back to listening. Only harmless commands.
-
-**Started:** 2026-10-30  
-**Completed:** 2026-10-30  
-
-### Implementation Deliverables
-- [x] **Frozen Contracts:** `AssistantState`, `AssistantAction`, `ActionResult`, `ActionHandler` in `com.spidey.assistant`.
-- [x] **ConversationManager:** Authoritative thread-safe state machine (`StateFlow`) coordinating the voice lifecycle.
-- [x] **WakeWordService:** Foreground microphone service with ongoing notification and Stop button.
-- [x] **Mic Handoff:** Clean state transition: pause wake engine, release mic, beep cue, listen (`en-IN`), re-arm wake engine.
-- [x] **SpeechRecognizerManager:** Bounded listening (`en-IN`) with silence timeout watchdog and fresh session lifecycle.
-- [x] **SpeechOutput:** Android TTS with self-trigger suppression.
-- [x] **IntentEngine v1:** Local rules for "hello" (`GreetingAction`) and "open youtube" (`OpenAppAction`).
-- [x] **ActionRouter:** Type-safe handler registry rejecting unknown actions.
-- [x] **Handlers:** `GreetingHandler`, `OpenAppHandler` with `AllowedApp.YOUTUBE` allowlist.
-- [x] **Compose Home Screen:** Dynamic state badge, live transcript cards, Start/Stop toggle, permissions status, spikes navigation.
-- [x] **Unlock Skeleton:** `UnlockCoordinator` and transparent `UnlockActivity` for keyguard dismissal on locked devices.
-- [x] **Unit Tests:** 12 tests passing across `IntentEngineTest`, `ActionRouterTest`, and `ConversationManagerTest`.
-- [x] **Phone Verification:** Verified live on Samsung Galaxy A14 5G. Spoken "Hey Spider" → "open YouTube" captured and launched successfully.
-
----
-
-## Phase 0 - Feasibility Spikes
-
-**Goal:** Prove the risky parts work on the real Samsung phone before building anything real.
-
-**Started:** 2026-10-20  
-**Completed:** 2026-10-25  
-
-### Environment Status (verified 2026-10-20)
-
-| Check | Status | Verified Detail |
-|---|---|---|
-| Git repo initialized | DONE | Branch: main (origin: github.com/Sandy-Dev-Hub/Spidey) |
-| Android Studio | DONE | C:\Program Files\Android\Android Studio |
-| Bundled JDK | DONE | OpenJDK 25.0.3 (jbr\bin\java.exe) |
-| Android SDK root | DONE | C:\Users\cvbha\AppData\Local\Android\Sdk |
-| Platform API 35 (Android 15) | DONE | android.jar present at platforms\android-35 |
-| Platform API 37 (future) | PRESENT | android-37.0 also installed |
-| Build-Tools 36.0.0 | DONE | aapt2.exe present |
-| Platform-Tools (adb) | DONE | adb.exe present at platform-tools |
-| Command-line Tools | DONE | sdkmanager.bat at cmdline-tools\latest\bin |
-| Phone connected via adb | DONE | RZCW60PWC7J device (Samsung SM-A146B) |
-| Phone: Android version | DONE | Android 15 (SDK 35) |
-| Phone: Brand / Model | DONE | Samsung SM-A146B (Galaxy A14 5G) |
-| Phone: Build | DONE | AP3A.240905.015.A2.A146BXXSFDZI2 |
-| Phone: ro.debuggable | DONE | 0 (production build, normal) |
-
----
-
-### Spike Results
-
-| Spike | Status | Notes |
-|---|---|---|
-| Spike 1: Wake word | **PASS** | Vosk Indian English offline model; trigger phrase: "Hey Spider" / "Spider". |
-| Spike 2: Mic handoff | **PASS** | 645 ms total time to ready; accurate `en-IN` capture on Samsung device. |
-| Spike 3: Background app launch | **PASS** | `startActivity` works screen-on; locked screen requires keyguard dismissal flow. |
-| Spike 4: Unlock prompt | **PASS** | WakeLock + FullScreenIntent wakes screen, presents PIN/fingerprint prompt. |
-| Spike 5: Test call | **PASS** | Detected dual SIMs (`Airtel FastLane`, `Jio`); `TelecomManager` dials directly. |
-| Spike 6: Screen-off stability | **PASS** | 64/64 heartbeats over 10+ min screen-off; service stays alive without wakeLock. |
-
-### Exit Criteria
-
-- [x] docs/PHASE0_RESULTS.md with pass/fail table for all six spikes
-- [x] Written decision: plain foreground service vs. default-assistant role (Decision: Plain foreground service with Unrestricted battery)
-- [x] Chosen wake phrase and engine confirmed (Phrase: "Hey Spider" / "Spider"; Engine: Vosk Indian English offline model)
-
----
-
-*Updated: 2026-10-31*

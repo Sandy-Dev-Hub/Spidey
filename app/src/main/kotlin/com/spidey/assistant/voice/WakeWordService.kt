@@ -20,9 +20,11 @@ import com.spidey.assistant.actions.CallActionHandler
 import com.spidey.assistant.actions.FindContactHandler
 import com.spidey.assistant.actions.GreetingHandler
 import com.spidey.assistant.actions.OpenAppHandler
+import com.spidey.assistant.actions.PlayFirstResultHandler
 import com.spidey.assistant.actions.SearchYouTubeHandler
 import com.spidey.assistant.actions.StopHandler
 import com.spidey.assistant.actions.TimeHandler
+import com.spidey.assistant.actions.UnlockHandler
 import com.spidey.assistant.calling.CallCoordinator
 import com.spidey.assistant.calling.CallingAccountRepository
 import com.spidey.assistant.contacts.ContactRepository
@@ -121,7 +123,12 @@ class WakeWordService : Service() {
             register(GreetingHandler())
             register(StopHandler())
             register(TimeHandler())
+            register(UnlockHandler {
+                val km = getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+                km?.isDeviceLocked == true
+            })
             register(OpenAppHandler(this@WakeWordService))
+            register(PlayFirstResultHandler())
             register(SearchYouTubeHandler(this@WakeWordService))
             register(FindContactHandler(contactRepository))
             register(CallActionHandler(contactRepository, callingAccountRepository, callCoordinator, permManager))
@@ -181,7 +188,7 @@ class WakeWordService : Service() {
                     onFailed = { conversationManager.stop() }
                 )
             },
-            followUpTimeoutMs = 30_000L
+            followUpTimeoutMs = 8_000L
         )
 
         _activeManager.value = conversationManager

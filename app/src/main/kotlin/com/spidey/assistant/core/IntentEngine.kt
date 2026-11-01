@@ -6,15 +6,26 @@ import com.spidey.assistant.actions.CallContactAction
 import com.spidey.assistant.actions.FindContactAction
 import com.spidey.assistant.actions.GreetingAction
 import com.spidey.assistant.actions.OpenAppAction
+import com.spidey.assistant.actions.PlayFirstResultAction
 import com.spidey.assistant.actions.SearchYouTubeAction
 import com.spidey.assistant.actions.StopAction
 import com.spidey.assistant.actions.TimeAction
+import com.spidey.assistant.actions.UnlockAction
 import com.spidey.assistant.calling.CallSessionManager
 import com.spidey.assistant.safety.ConfirmationPolicy
 
 /**
- * Local rule-based intent engine.
+ * Local deterministic rule-based intent engine.
  * Converts natural speech text into a typed [AssistantAction] without external cloud or LLM dependencies.
+ *
+ * Deterministic Priority Order:
+ * 1. Clarifications / Confirmations (active user reply to Spidey prompts)
+ * 2. System Commands (stop, cancel, unlock my phone, time/date, feedback, greetings)
+ * 3. Open App Commands ("open whatsapp", "go to whatsapp", "launch chrome", "switch to contacts")
+ *    - ALWAYS wins over in-app search, even when YouTube is in front!
+ * 4. In-App Commands (YouTube: "play the first one", "search <query>", "play <query>")
+ * 5. Calling & Contact Commands ("call mom", "find john")
+ * 6. Clarify / null (never fall back to typing raw transcripts into search bars)
  */
 class IntentEngine {
 
@@ -31,54 +42,71 @@ class IntentEngine {
         }
 
         val isYouTubeContext = candidatesContext.contains("context:youtube")
+        val previousSearchQuery = candidatesContext.firstOrNull { it.startsWith("query:") }?.removePrefix("query:")
 
-        // 2. Check for explicit Stop / Sleep commands (e.g. "stop", "sleep", "bye", "cancel")
+        // 2. System commands
+        // 2a. Stop / Cancel / Sleep commands
         if (isStopCommand(normalized)) {
             return StopAction()
         }
 
-        // 3. Check for Time or Date request (e.g. "what is the time now")
+        // 2b. Unlock command ("unlock my phone", "unlock the phone", "unlock phone", "unlock")
+        if (isUnlockCommand(normalized)) {
+            return UnlockAction
+        }
+
+        // 2c. Time or Date request (e.g. "what is the time now", "what is today's date")
         val timeAction = matchTimeOrDate(normalized)
         if (timeAction != null) {
             return timeAction
         }
 
-        // 4. Check for user feedback / "I don't see anything"
+        // 2d. User feedback / "I don't see anything"
         val feedbackAction = matchFeedback(normalized)
         if (feedbackAction != null) {
             return feedbackAction
         }
 
-        // 5. Check for Greeting intent
+        // 2e. Greeting intent
         if (isGreeting(normalized)) {
             return GreetingAction(queryText = text)
         }
 
-        // 6. Check for Open App intent (ALWAYS WINS OVER IN-APP SEARCH)
+        // 3. Open App intent (ALWAYS WINS OVER IN-APP SEARCH)
         // E.g. "open whatsapp", "go to whatsapp", "open contacts", "launch chrome"
         val openAppAction = matchOpenApp(normalized)
         if (openAppAction != null) {
             return openAppAction
         }
 
-        // 7. Check for YouTube Search / Play intent
+        // 4. In-App commands (when foreground app is known and supports them)
+        // 4a. "play the first one" / "play first one" / "play the first video"
+        if (isPlayFirstCommand(normalized)) {
+            return PlayFirstResultAction(
+                query = previousSearchQuery,
+                targetApp = "youtube"
+            )
+        }
+
+        // 4b. YouTube Search / Play intent
         val ytSearchAction = matchYouTubeSearch(normalized, isYouTubeContext)
         if (ytSearchAction != null) {
             return ytSearchAction
         }
 
-        // 8. Check for Calling intent (Phase 3)
+        // 5. Calling & Contact intents
         val callAction = matchCall(normalized)
         if (callAction != null) {
             return callAction
         }
 
-        // 6. Check for Contact Search intent (Phase 2)
         val contactAction = matchContactSearch(normalized)
         if (contactAction != null) {
             return contactAction
         }
 
+        // 6. Fallback: Return null so Spidey speaks "I didn't understand that."
+        // NEVER type raw transcript into active fields!
         return null
     }
 
@@ -115,7 +143,9 @@ class IntentEngine {
                     isCancelled = true
                 )
             }
-            val choices = candidatesContext.filter { it != "sim_choice" }
+            val choices = candidatesContext.filter {
+                it != "sim_choice" && !it.startsWith("context:") && !it.startsWith("query:")
+            }
             val chosen = resolveClarification(reply, choices) ?: reply
             return CallContactAction(
                 contactQuery = session?.contactQuery ?: "",
@@ -127,7 +157,9 @@ class IntentEngine {
 
         // C. Ambiguous Open App selection
         if (candidatesContext.contains("open_app_choice")) {
-            val choices = candidatesContext.filter { it != "open_app_choice" }
+            val choices = candidatesContext.filter {
+                it != "open_app_choice" && !it.startsWith("context:") && !it.startsWith("query:")
+            }
             val chosen = resolveClarification(reply, choices) ?: reply
             return OpenAppAction(appName = chosen)
         }
@@ -135,7 +167,9 @@ class IntentEngine {
         // D. Phone number selection
         if (candidatesContext.contains("number_choice")) {
             val session = CallSessionManager.getValidSession()
-            val choices = candidatesContext.filter { it != "number_choice" }
+            val choices = candidatesContext.filter {
+                it != "number_choice" && !it.startsWith("context:") && !it.startsWith("query:")
+            }
             val chosen = resolveClarification(reply, choices) ?: reply
             return CallContactAction(
                 contactQuery = session?.contactQuery ?: "",
@@ -144,14 +178,21 @@ class IntentEngine {
             )
         }
 
-        // D. Ambiguous contact resolution
-        val resolvedCandidate = resolveClarification(reply, candidatesContext)
-        if (resolvedCandidate != null) {
-            val session = CallSessionManager.getValidSession()
-            return if (session != null) {
-                CallContactAction(contactQuery = resolvedCandidate)
-            } else {
-                FindContactAction(query = resolvedCandidate)
+        // E. Ambiguous contact resolution (ONLY when actual candidate contact strings are present)
+        val contactCandidates = candidatesContext.filter {
+            !it.startsWith("context:") && !it.startsWith("query:") &&
+            it != "confirm_call" && it != "sim_choice" && it != "open_app_choice" && it != "number_choice" &&
+            it != "yes" && it != "no" && it != "cancel"
+        }
+        if (contactCandidates.isNotEmpty() && !isPlayFirstCommand(reply)) {
+            val resolvedCandidate = resolveClarification(reply, contactCandidates)
+            if (resolvedCandidate != null) {
+                val session = CallSessionManager.getValidSession()
+                return if (session != null) {
+                    CallContactAction(contactQuery = resolvedCandidate)
+                } else {
+                    FindContactAction(query = resolvedCandidate)
+                }
             }
         }
 
@@ -165,6 +206,27 @@ class IntentEngine {
             "exit", "close", "turn off", "quit", "stop listening", "stop assistant"
         )
         return clean in stopPhrases
+    }
+
+    private fun isUnlockCommand(text: String): Boolean {
+        val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+        val unlockPhrases = setOf(
+            "unlock my phone", "unlock the phone", "unlock phone", "unlock",
+            "please unlock my phone", "please unlock the phone", "unlock device"
+        )
+        return clean in unlockPhrases
+    }
+
+    private fun isPlayFirstCommand(text: String): Boolean {
+        val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+        val playFirstPhrases = setOf(
+            "play the first one", "play first one", "play the first", "play first",
+            "play the first video", "play first video", "play the first result", "play first result",
+            "play the first song", "play first song", "play the 1st one", "play 1st one",
+            "play 1st video", "play the 1st video", "play the 1st result", "play 1st result",
+            "play the first track", "play first track", "play the first movie", "play first movie"
+        )
+        return clean in playFirstPhrases
     }
 
     private fun isGreeting(text: String): Boolean {
@@ -227,8 +289,9 @@ class IntentEngine {
     private fun matchYouTubeSearch(text: String, isYouTubeContext: Boolean = false): AssistantAction? {
         val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
 
-        // Safety: Never route phrases starting with open/launch verbs into a search query
-        // unless it is an explicit compound pattern like "open youtube and search..."
+        // STRICT SAFETY GUARD:
+        // Any phrase starting with open/launch verbs NEVER produces a search action,
+        // unless it is an explicit compound search like "open youtube and search..." or "go to search bar..."
         val openVerbs = listOf("open ", "go to ", "launch ", "switch to ", "start ")
         if (openVerbs.any { clean.startsWith(it) }) {
             val isExplicitCompoundSearch = clean.startsWith("open youtube and search") ||
@@ -263,6 +326,7 @@ class IntentEngine {
             "open youtube search for song",
             "open youtube search for trailer",
             "open youtube search for",
+            "open youtube search",
             "open youtube play",
             "go to youtube and search for song",
             "go to youtube and search for the song",
@@ -290,6 +354,14 @@ class IntentEngine {
             "go to search bar and search",
             "search bar and search for",
             "search bar and search",
+            "search on youtube for",
+            "search on youtube",
+            "search in youtube for",
+            "search in youtube",
+            "search youtube for",
+            "search youtube",
+            "play on youtube",
+            "play in youtube",
             "search for song",
             "search for the song",
             "search song",
@@ -303,14 +375,6 @@ class IntentEngine {
             "search for music",
             "search music",
             "search for track",
-            "search on youtube for",
-            "search on youtube",
-            "search in youtube for",
-            "search in youtube",
-            "search youtube for",
-            "search youtube",
-            "play on youtube",
-            "play in youtube",
             "play song",
             "play the song",
             "play trailer",
@@ -326,13 +390,14 @@ class IntentEngine {
             if (clean.startsWith("$prefix ")) {
                 var query = clean.removePrefix("$prefix ").trim()
                 query = query.removeSuffix(" on youtube").removeSuffix(" in youtube").trim()
-                if (query.isNotBlank()) {
-                    return SearchYouTubeAction(query = query)
+                val sanitized = sanitizeSearchQuery(query)
+                if (sanitized != null) {
+                    return SearchYouTubeAction(query = sanitized)
                 }
             }
         }
 
-        // 2. Trailing "on youtube" patterns: e.g. "search despacito on youtube", "play believer on youtube"
+        // 2. Trailing "on youtube" patterns: e.g. "search despacito on youtube", "play believer on youtube", "play Jailer 2 song on YouTube"
         if (clean.endsWith(" on youtube") || clean.endsWith(" in youtube")) {
             var trimmed = clean.removeSuffix(" on youtube").removeSuffix(" in youtube").trim()
             val leadingTriggers = listOf("search for", "search", "play", "find", "look for", "listen to")
@@ -342,12 +407,13 @@ class IntentEngine {
                     break
                 }
             }
-            if (trimmed.isNotBlank()) {
-                return SearchYouTubeAction(query = trimmed)
+            val sanitized = sanitizeSearchQuery(trimmed)
+            if (sanitized != null) {
+                return SearchYouTubeAction(query = sanitized)
             }
         }
 
-        // 3. Media-specific keywords with search/find verbs (e.g. "search for infinity war trailer", "search for song ...")
+        // 3. Media-specific keywords with search/find verbs (e.g. "search for infinity war trailer", "search for song ...", "search Jailer 2 song")
         val mediaKeywords = setOf(
             "song", "songs", "movie", "movies", "video", "videos", "music", "track", "tracks",
             "trailer", "trailers", "teaser", "teasers", "film", "films", "clip", "clips",
@@ -359,7 +425,6 @@ class IntentEngine {
             for (trigger in searchTriggers) {
                 if (clean.startsWith("$trigger ")) {
                     var candidate = clean.removePrefix("$trigger ").trim()
-                    // Strip optional leading descriptor word (e.g. "trailer infinity war..." -> "infinity war...", "the song...")
                     val stripLeading = listOf(
                         "the song ", "song ", "the movie ", "movie ", "the video ", "video ",
                         "the music ", "music ", "the track ", "track ", "the trailer ", "trailer ",
@@ -371,8 +436,9 @@ class IntentEngine {
                             break
                         }
                     }
-                    if (candidate.isNotBlank()) {
-                        return SearchYouTubeAction(query = candidate)
+                    val sanitized = sanitizeSearchQuery(candidate)
+                    if (sanitized != null) {
+                        return SearchYouTubeAction(query = sanitized)
                     }
                 }
             }
@@ -389,27 +455,49 @@ class IntentEngine {
             for (trigger in searchTriggers) {
                 if (clean.startsWith("$trigger ")) {
                     val candidate = clean.removePrefix("$trigger ").trim()
-                    if (candidate.isNotBlank()) {
-                        return SearchYouTubeAction(query = candidate)
+                    val sanitized = sanitizeSearchQuery(candidate)
+                    if (sanitized != null) {
+                        return SearchYouTubeAction(query = sanitized)
                     }
                 }
             }
             // Media queries with specific keywords (trailer, song, video, etc.) in YouTube context
             val queryWords = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
             if (queryWords.any { it in mediaKeywords }) {
-                return SearchYouTubeAction(query = clean)
+                val sanitized = sanitizeSearchQuery(clean)
+                if (sanitized != null) {
+                    return SearchYouTubeAction(query = sanitized)
+                }
             }
         }
 
         // 5. "play [song/artist]" intent (e.g. "play some song", "play believer")
         if (clean.startsWith("play ") && clean != "play youtube") {
             val query = clean.removePrefix("play ").trim()
-            if (query.isNotBlank()) {
-                return SearchYouTubeAction(query = query)
+            val sanitized = sanitizeSearchQuery(query)
+            if (sanitized != null) {
+                return SearchYouTubeAction(query = sanitized)
             }
         }
 
         return null
+    }
+
+    /**
+     * Sanitizes search queries and enforces strict routing rules:
+     * - A search query must NEVER begin with open/launch verbs ("open", "go to", "launch", "switch to", "start").
+     * - Returns null if the query is blank or invalid.
+     */
+    private fun sanitizeSearchQuery(query: String): String? {
+        val clean = query.trim()
+        if (clean.isBlank()) return null
+
+        val forbiddenPrefixes = listOf("open ", "go to ", "launch ", "switch to ", "start ")
+        if (forbiddenPrefixes.any { clean.startsWith(it) }) {
+            return null
+        }
+
+        return clean
     }
 
     private fun matchOpenApp(text: String): AssistantAction? {
@@ -426,71 +514,69 @@ class IntentEngine {
             "start", "go to", "show", "run", "click on", "switch to"
         )
 
-        var appName: String? = null
+        var candidateAppName: String? = null
 
-        val nonAppPrefixes = listOf("search bar", "search", "play", "find", "look for", "listen to", "call")
+        val nonAppPrefixes = listOf(
+            "search bar", "search", "play", "find", "look for", "listen to", "call"
+        )
 
-        // Check if starts with a trigger
+        // 1. Starts with an explicit open trigger
         for (trigger in appTriggers) {
             if (clean.startsWith("$trigger ")) {
                 val candidate = clean.removePrefix("$trigger ").trim()
                 if (candidate.isNotBlank() && nonAppPrefixes.none { candidate.startsWith(it) }) {
-                    appName = candidate
+                    candidateAppName = candidate
                     break
                 }
             }
         }
 
-        // Check if any known app name is mentioned with an open/show verb anywhere in the command
-        // e.g. "gallery open the recent", "open the recent photo in gallery"
-        if (appName == null) {
-            val openVerbs = setOf("open", "launch", "show", "start", "view", "go")
+        // 2. Mentions a known app name with an open verb anywhere in the sentence
+        if (candidateAppName == null) {
+            val openVerbs = setOf("open", "launch", "show", "start", "view", "go", "switch")
             if (words.any { it in openVerbs }) {
                 for (allowed in AllowedApp.entries) {
                     val names = listOf(allowed.displayName.lowercase()) + allowed.aliases
                     if (names.any { name -> words.contains(name) }) {
-                        appName = allowed.displayName
+                        candidateAppName = allowed.displayName
                         break
                     }
                 }
             }
         }
 
-        // Single word or known standalone app name (e.g. "whatsapp", "youtube", "camera", "spotify", "chrome")
-        if (appName == null) {
-            if (words.size in 1..2) {
-                val known = AllowedApp.entries.firstOrNull {
-                    it.displayName.equals(clean, ignoreCase = true) ||
-                    it.aliases.any { alias -> alias.equals(clean, ignoreCase = true) }
-                }
-                if (known != null) {
-                    appName = known.displayName
-                }
+        // 3. Standalone app name (1 to 2 words, e.g. "whatsapp", "youtube", "camera", "spotify", "chrome")
+        if (candidateAppName == null && words.size in 1..2) {
+            val known = AllowedApp.entries.firstOrNull {
+                it.displayName.equals(clean, ignoreCase = true) ||
+                it.aliases.any { alias -> alias.equals(clean, ignoreCase = true) }
+            }
+            if (known != null) {
+                candidateAppName = known.displayName
             }
         }
 
-        if (appName != null) {
-            // Strip any leading or trailing filler words
-            appName = appName.removePrefix("with ").trim()
-            appName = appName.removeSuffix(" app").removeSuffix(" application").trim()
+        if (candidateAppName != null) {
+            candidateAppName = candidateAppName.removePrefix("with ").trim()
+            candidateAppName = candidateAppName.removeSuffix(" app").removeSuffix(" application").trim()
 
             // Check if matches AllowedApp enum
             val matchedAllowed = AllowedApp.entries.firstOrNull {
-                it.displayName.equals(appName, ignoreCase = true) ||
-                it.aliases.any { alias -> alias.equals(appName, ignoreCase = true) }
+                it.displayName.equals(candidateAppName, ignoreCase = true) ||
+                it.aliases.any { alias -> alias.equals(candidateAppName, ignoreCase = true) }
             }
 
-            return if (matchedAllowed != null) {
-                OpenAppAction(appName = matchedAllowed.displayName, packageName = matchedAllowed.packageName)
-            } else if (clean.startsWith("open ") || clean.startsWith("launch ") || clean.startsWith("go to ") || clean.startsWith("switch to ")) {
-                val appWords = appName.split("\\s+".toRegex()).filter { it.isNotBlank() }
-                if (appWords.size <= 3 && !appName.contains(" on ") && !appName.contains(" in ")) {
-                    OpenAppAction(appName = appName)
-                } else {
-                    null
+            if (matchedAllowed != null) {
+                return OpenAppAction(appName = matchedAllowed.displayName, packageName = matchedAllowed.packageName)
+            }
+
+            // Dynamic open for any installed app (Task 3: open any installed app by spoken name)
+            val isExplicitOpenCommand = appTriggers.any { clean.startsWith("$it ") }
+            if (isExplicitOpenCommand) {
+                val appWords = candidateAppName.split("\\s+".toRegex()).filter { it.isNotBlank() }
+                if (appWords.size <= 4 && !candidateAppName.contains(" and ") && !candidateAppName.contains(" on ") && !candidateAppName.contains(" in ")) {
+                    return OpenAppAction(appName = candidateAppName)
                 }
-            } else {
-                null
             }
         }
 
@@ -555,10 +641,7 @@ class IntentEngine {
         val prefixes = listOf(
             "search for contact",
             "search contact",
-            "search for",
-            "search",
             "find contact",
-            "find",
             "lookup contact",
             "look up contact",
             "lookup",
@@ -568,7 +651,10 @@ class IntentEngine {
             "number for",
             "contact details for",
             "contact for",
-            "contact"
+            "contact",
+            "search for",
+            "search",
+            "find"
         )
 
         for (prefix in prefixes) {

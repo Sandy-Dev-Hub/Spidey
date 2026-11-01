@@ -15,6 +15,7 @@ data class SearchYouTubeAction(val query: String) : AssistantAction
 
 /**
  * Handles [SearchYouTubeAction] by launching YouTube directly with search results or playback.
+ * Uses Android 15-compliant BackgroundAppLauncher routes.
  */
 class SearchYouTubeHandler(
     private val context: Context,
@@ -46,16 +47,15 @@ class SearchYouTubeHandler(
                 putExtra(android.app.SearchManager.QUERY, cleanQuery)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
-            try {
-                context.startActivity(intent)
-            } catch (_: Exception) {
-                // If native YouTube app package is not available, open in default browser
+            val launched = BackgroundAppLauncher.launch(context, intent)
+            if (!launched) {
+                // If native YouTube app package is not available or direct launch failed, open in browser
                 val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
                 val webUri = Uri.parse("https://www.youtube.com/results?search_query=$encoded")
                 val webIntent = Intent(Intent.ACTION_VIEW, webUri).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
-                context.startActivity(webIntent)
+                BackgroundAppLauncher.launch(context, webIntent)
             }
             ActionResult.Success(spokenMessage = "Searching $cleanQuery on YouTube.")
         } catch (e: Exception) {
