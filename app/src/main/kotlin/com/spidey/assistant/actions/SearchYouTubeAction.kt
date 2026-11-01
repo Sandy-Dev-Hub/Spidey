@@ -7,6 +7,9 @@ import android.net.Uri
 import com.spidey.assistant.core.ActionHandler
 import com.spidey.assistant.core.ActionResult
 import com.spidey.assistant.youtube.YouTubePlayerHelper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.net.URLEncoder
 
 /**
@@ -19,6 +22,7 @@ data class SearchYouTubeAction(
 
 /**
  * Handles [SearchYouTubeAction] by searching or directly playing via YouTube.
+ * Pre-fetches the first video in the background for instant playback if user requests "play first one".
  * Uses Android 15-compliant BackgroundAppLauncher routes.
  */
 class SearchYouTubeHandler(
@@ -68,6 +72,12 @@ class SearchYouTubeHandler(
                 }
                 BackgroundAppLauncher.launch(context, webIntent)
             }
+
+            // Pre-fetch the first video in background for instant playback if user follows up with "play the first one"
+            CoroutineScope(Dispatchers.IO).launch {
+                YouTubePlayerHelper.preFetchVideoId(cleanQuery)
+            }
+
             ActionResult.Success(spokenMessage = "Searching $cleanQuery on YouTube.")
         } catch (e: Exception) {
             ActionResult.Failure(

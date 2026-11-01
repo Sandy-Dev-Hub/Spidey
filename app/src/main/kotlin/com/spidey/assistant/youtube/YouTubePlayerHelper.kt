@@ -12,19 +12,29 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Helper to resolve YouTube video IDs from search queries and directly initiate playback.
+ * Includes in-memory caching and pre-fetching for instant playback.
  */
 object YouTubePlayerHelper {
 
     private const val TAG = "SPIDEY"
     private val VIDEO_ID_REGEX = Regex("\"videoId\":\"([a-zA-Z0-9_-]{11})\"")
+    private val queryCache = ConcurrentHashMap<String, String>()
 
     /**
-     * Resolves the first video ID for a query by fetching YouTube search results.
+     * Resolves the first video ID for a query by fetching YouTube search results (cached when available).
      */
     suspend fun resolveFirstVideoId(query: String): String? = withContext(Dispatchers.IO) {
+        val norm = query.trim().lowercase()
+        val cached = queryCache[norm]
+        if (!cached.isNullOrBlank()) {
+            SpikeLogger.log(TAG, "YouTubePlayerHelper cache hit for '$query': $cached")
+            return@withContext cached
+        }
+
         var conn: HttpURLConnection? = null
         var reader: BufferedReader? = null
         try {
@@ -33,8 +43,8 @@ object YouTubePlayerHelper {
             val url = URL(searchUrl)
             conn = (url.openConnection() as HttpURLConnection).apply {
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                connectTimeout = 4000
-                readTimeout = 4000
+                connectTimeout = 3000
+                readTimeout = 3000
             }
 
             reader = BufferedReader(InputStreamReader(conn.inputStream))
@@ -50,6 +60,10 @@ object YouTubePlayerHelper {
                 line = reader.readLine()
             }
 
+            if (foundId != null) {
+                queryCache[norm] = foundId
+            }
+
             SpikeLogger.log(TAG, "YouTubePlayerHelper resolved videoId for '$query': $foundId")
             foundId
         } catch (e: Exception) {
@@ -60,6 +74,16 @@ object YouTubePlayerHelper {
                 reader?.close()
                 conn?.disconnect()
             } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Pre-fetches the first video ID in the background while the user looks at search results.
+     */
+    suspend fun preFetchVideoId(query: String) = withContext(Dispatchers.IO) {
+        val norm = query.trim().lowercase()
+        if (!queryCache.containsKey(norm)) {
+            resolveFirstVideoId(query)
         }
     }
 
@@ -88,4 +112,3 @@ object YouTubePlayerHelper {
         }
     }
 }
-
