@@ -21,18 +21,35 @@
 
 **Started:** 2026-10-20
 
-### Environment Status
+### Environment Status (verified 2026-10-20)
 
-| Check | Status | Notes |
-|-------|--------|-------|
+| Check | Status | Verified Detail |
+|-------|--------|-----------------|
 | Git repo initialized | DONE | Branch: phase-0-feasibility |
-| Android Studio installed | MISSING | Not found on this machine |
-| Android SDK installed | MISSING | Not found on this machine |
-| Java / JDK on PATH | MISSING | java not found in PATH |
-| adb on PATH | MISSING | Not found in PATH |
-| Phone USB debugging enabled | NEEDS CHECK | Cannot verify without adb |
-| Samsung USB driver installed | NEEDS CHECK | Cannot verify without adb |
-| Phone visible via adb | NEEDS CHECK | Cannot verify without adb |
+| Android Studio | DONE | C:\Program Files\Android\Android Studio |
+| Bundled JDK | DONE | OpenJDK 25.0.3 (jbr\bin\java.exe) |
+| Android SDK root | DONE | C:\Users\cvbha\AppData\Local\Android\Sdk |
+| Platform API 35 (Android 15) | DONE | android.jar present at platforms\android-35 |
+| Platform API 37 (future) | PRESENT | android-37.0 also installed |
+| Build-Tools 36.0.0 | DONE | aapt2.exe present |
+| Platform-Tools (adb) | DONE | adb.exe present at platform-tools |
+| Command-line Tools | DONE | sdkmanager.bat at cmdline-tools\latest\bin |
+| Phone connected via adb | DONE | RZCW60PWC7J device (Samsung SM-A146B) |
+| Phone: Android version | DONE | Android 15 (SDK 35) |
+| Phone: Brand / Model | DONE | Samsung SM-A146B (Galaxy A14 5G) |
+| Phone: Build | DONE | AP3A.240905.015.A2.A146BXXSFDZI2 |
+| Phone: ro.debuggable | DONE | 0 (production build, normal) |
+
+### No remaining blockers. Ready to build.
+
+### SDK / Build path shortcuts (for Gradle local.properties)
+
+```
+sdk.dir=C\:\\Users\\cvbha\\AppData\\Local\\Android\\Sdk
+org.gradle.java.home=C\:\\Program Files\\Android\\Android Studio\\jbr
+```
+
+---
 
 ### Spike Results
 
@@ -50,12 +67,6 @@
 - [ ] docs/PHASE0_RESULTS.md with pass/fail table for all six spikes
 - [ ] Written decision: plain foreground service vs. default-assistant role
 - [ ] Chosen wake phrase and engine confirmed
-
-### Known Issues / Blockers
-
-- Android Studio not installed - required to build and install the spike APK.
-- Java JDK not on PATH - required by Gradle.
-- adb not on PATH - required to install and test on device.
 
 ---
 
