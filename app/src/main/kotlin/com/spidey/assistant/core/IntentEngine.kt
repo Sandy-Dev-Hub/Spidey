@@ -125,7 +125,14 @@ class IntentEngine {
             )
         }
 
-        // C. Phone number selection
+        // C. Ambiguous Open App selection
+        if (candidatesContext.contains("open_app_choice")) {
+            val choices = candidatesContext.filter { it != "open_app_choice" }
+            val chosen = resolveClarification(reply, choices) ?: reply
+            return OpenAppAction(appName = chosen)
+        }
+
+        // D. Phone number selection
         if (candidatesContext.contains("number_choice")) {
             val session = CallSessionManager.getValidSession()
             val choices = candidatesContext.filter { it != "number_choice" }

@@ -4,6 +4,11 @@ import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import com.spidey.assistant.apps.AppExclusionRepository
+import com.spidey.assistant.apps.AppLauncherRepository
+import com.spidey.assistant.apps.matcher.AppMatchResult
+import com.spidey.assistant.apps.matcher.AppMatcher
+import com.spidey.assistant.apps.model.AppRecord
 import com.spidey.assistant.core.ActionHandler
 import com.spidey.assistant.core.ActionResult
 import com.spidey.spikes.util.SpikeLogger
@@ -54,12 +59,16 @@ data class OpenAppAction(
 
 /**
  * Handles [OpenAppAction] safely from any background state.
- * Uses Android 15-compliant BackgroundAppLauncher routes.
- * Verifies that the target app is actually in the foreground before reporting success.
- * If the device is locked, returns [ActionResult.NeedsUnlock] to prompt the unlock flow.
+ * Dynamically resolves any installed app by spoken name using [AppMatcher] (fuzzy matching + alias table).
+ * Never uses an allowlist; excludes apps marked by the user in [AppExclusionRepository].
+ * Resolves packages strictly locally from app labels.
+ * Uses Android 15-compliant BackgroundAppLauncher routes and verifies foreground status.
  */
 class OpenAppHandler(
     private val context: Context,
+    private val appLauncherRepository: AppLauncherRepository = AppLauncherRepository(context),
+    private val appExclusionRepository: AppExclusionRepository = AppExclusionRepository(context),
+    private val appMatcher: AppMatcher = AppMatcher(),
     private val isDeviceLocked: () -> Boolean = {
         val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
         km?.isDeviceLocked == true
@@ -73,71 +82,56 @@ class OpenAppHandler(
             return ActionResult.NeedsUnlock
         }
 
-        val pm = context.packageManager
-        val targetName = action.appName.trim().lowercase()
+        val installedApps = appLauncherRepository.getInstalledApps()
 
-        // 1. Check known app mappings
-        var targetPackage: String? = action.packageName
-        var displayLabel: String = action.appName
+        // 1. Resolve target app locally using fuzzy matching & aliases
+        val matchResult = appMatcher.match(action.appName, installedApps)
 
-        if (targetPackage == null) {
-            val matchedAllowed = AllowedApp.entries.firstOrNull {
-                it.displayName.lowercase() == targetName ||
-                it.aliases.any { alias -> alias == targetName } ||
-                targetName.contains(it.displayName.lowercase())
+        val targetApp: AppRecord = when (matchResult) {
+            is AppMatchResult.NotFound -> {
+                return ActionResult.Failure(
+                    spokenMessage = "I couldn't find ${action.appName} on your phone.",
+                    reason = "App not found in installed apps"
+                )
             }
-            if (matchedAllowed != null) {
-                targetPackage = matchedAllowed.packageName
-                displayLabel = matchedAllowed.displayName
+            is AppMatchResult.Ambiguous -> {
+                val candidateLabels = matchResult.candidates.map { it.label }
+                val question = "I found ${candidateLabels.joinToString(" and ")}. Which one would you like to open?"
+                return ActionResult.NeedsClarification(
+                    question = question,
+                    candidates = listOf("open_app_choice") + candidateLabels
+                )
             }
-        }
-
-        // 2. If package not resolved yet, dynamic scan across all installed launcher apps
-        if (targetPackage == null) {
-            val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-            val resolveInfos = pm.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
-
-            // Exact match on label
-            var bestMatch = resolveInfos.firstOrNull {
-                it.loadLabel(pm).toString().trim().lowercase() == targetName
-            }
-
-            // Substring / word match
-            if (bestMatch == null) {
-                bestMatch = resolveInfos.firstOrNull {
-                    val label = it.loadLabel(pm).toString().trim().lowercase()
-                    label.contains(targetName) || targetName.contains(label)
-                }
-            }
-
-            if (bestMatch != null) {
-                targetPackage = bestMatch.activityInfo.packageName
-                displayLabel = bestMatch.loadLabel(pm).toString()
+            is AppMatchResult.Resolved -> {
+                matchResult.app
             }
         }
 
-        if (targetPackage == null) {
+        // 2. Check user exclusion preferences (e.g. banking apps)
+        if (appExclusionRepository.isAppExcluded(targetApp.packageName)) {
+            SpikeLogger.log("SPIDEY", "Blocked launch of excluded app: ${targetApp.label} (${targetApp.packageName})")
             return ActionResult.Failure(
-                spokenMessage = "I couldn't find ${action.appName} on your phone.",
-                reason = "App not found or not installed"
+                spokenMessage = "${targetApp.label} is excluded from voice launch in your settings.",
+                reason = "App excluded by user preference"
             )
         }
 
-        val launchIntent = pm.getLaunchIntentForPackage(targetPackage)
+        val pm = context.packageManager
+        val launchIntent = pm.getLaunchIntentForPackage(targetApp.packageName)
         if (launchIntent == null) {
             return ActionResult.Failure(
-                spokenMessage = "I couldn't launch $displayLabel.",
-                reason = "No launcher intent for package $targetPackage"
+                spokenMessage = "I couldn't launch ${targetApp.label}.",
+                reason = "No launcher intent for package ${targetApp.packageName}"
             )
         }
 
-        SpikeLogger.log("SPIDEY", "Attempting background launch for $displayLabel ($targetPackage)")
+        SpikeLogger.log("SPIDEY", "Attempting background launch for ${targetApp.label} (${targetApp.packageName})")
 
-        // 3. Launch via background-activity-allowed options
+        // 3. Launch via BAL-exempt route
         val launched = BackgroundAppLauncher.launch(context, launchIntent)
         if (!launched) {
             return ActionResult.Failure(
-                spokenMessage = "Failed to open $displayLabel.",
+                spokenMessage = "Failed to open ${targetApp.label}.",
                 reason = "startActivity failed"
             )
         }
@@ -146,21 +140,22 @@ class OpenAppHandler(
         var isVerifiedInForeground = false
         for (i in 0 until 6) {
             delay(250)
-            if (BackgroundAppLauncher.isAppInForeground(context, targetPackage)) {
+            if (BackgroundAppLauncher.isAppInForeground(context, targetApp.packageName)) {
                 isVerifiedInForeground = true
                 break
             }
         }
 
         return if (isVerifiedInForeground) {
-            SpikeLogger.log("SPIDEY", "✅ Verified in foreground: $displayLabel ($targetPackage)")
-            ActionResult.Success(spokenMessage = "Opening $displayLabel.")
+            SpikeLogger.log("SPIDEY", "✅ Verified in foreground: ${targetApp.label} (${targetApp.packageName})")
+            ActionResult.Success(spokenMessage = "Opening ${targetApp.label}.")
         } else {
-            SpikeLogger.log("SPIDEY", "⚠️ Unverified foreground state for $displayLabel ($targetPackage)")
+            SpikeLogger.log("SPIDEY", "⚠️ Unverified foreground state for ${targetApp.label} (${targetApp.packageName})")
             ActionResult.Failure(
-                spokenMessage = "I sent the request to open $displayLabel, but can't confirm it worked.",
+                spokenMessage = "I sent the request to open ${targetApp.label}, but can't confirm it worked.",
                 reason = "Target app did not reach foreground within timeout"
             )
         }
     }
 }
+

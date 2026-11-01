@@ -86,7 +86,8 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     onNavigateToSpikes: () -> Unit = {},
-    onNavigateToAliases: () -> Unit = {}
+    onNavigateToAliases: () -> Unit = {},
+    onNavigateToExclusions: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isServiceRunning by WakeWordService.isServiceRunning.collectAsState()
@@ -202,6 +203,13 @@ fun HomeScreen(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick = onNavigateToExclusions,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Exclusions", fontSize = 12.sp)
+                    }
+
                     OutlinedButton(
                         onClick = onNavigateToAliases,
                         shape = RoundedCornerShape(12.dp)

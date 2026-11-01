@@ -91,11 +91,17 @@ fun SpideyNavGraph() {
         composable("home") {
             HomeScreen(
                 onNavigateToSpikes = { nav.navigate("menu") },
-                onNavigateToAliases = { nav.navigate("aliases") }
+                onNavigateToAliases = { nav.navigate("aliases") },
+                onNavigateToExclusions = { nav.navigate("exclusions") }
             )
         }
         composable("aliases") {
             com.spidey.assistant.ui.settings.AliasSettingsScreen(
+                onNavigateBack = { nav.popBackStack() }
+            )
+        }
+        composable("exclusions") {
+            com.spidey.assistant.ui.settings.AppExclusionScreen(
                 onNavigateBack = { nav.popBackStack() }
             )
         }

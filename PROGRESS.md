@@ -1,6 +1,6 @@
 # SPIDEY - Progress Tracker
 
-## Current Phase: Fix Round - Task 2 (Background Launch)
+## Current Phase: Fix Round - Task 3 (Any App By Name)
 
 | Phase | Status | Branch | Tag |
 |---|---|---|---|
@@ -10,11 +10,30 @@
 | Phase 3 - Calling and SIM | **VERIFIED ON DEVICE** | `phase-3-calling` | `phase-3-done` |
 | Multi-App & Auto-Wake Hotfix | **VERIFIED ON DEVICE** | `main` | `assistant-hotfix-done` |
 | Fix Round: Task 1 (Wake Word Outside App) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
-| **Fix Round: Task 2 (Background Launch)** | **BUILT & TESTED** | `phase-0-feasibility` | - |
-| Fix Round: Task 3 (Any App By Name) | WAITING | - | - |
+| Fix Round: Task 2 (Background Launch) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| **Fix Round: Task 3 (Any App By Name)** | **BUILT & TESTED** | `phase-0-feasibility` | - |
 | Fix Round: Task 4 (Command Routing Fix) | WAITING | - | - |
 | Fix Round: Task 5 (YouTube Search & Play) | WAITING | - | - |
 | Fix Round: Task 6 (Supported Unlock Flow) | WAITING | - | - |
+
+---
+
+## Fix Round - Task 3: Open Any Installed App By Name
+
+**Goal:** No hard-coded allowlist. Open any installed app by spoken name using PackageManager, alias table, and Levenshtein fuzzy matching, with exclusion settings.
+
+**Completed:** 2026-11-01
+
+### Implementation Deliverables
+- [x] **Dynamic App Discovery (`AppLauncherRepository.kt`):** Discovers all launchable applications via `PackageManager.queryIntentActivities` with `ACTION_MAIN` + `CATEGORY_LAUNCHER`. Note: Package visibility declared via `QUERY_ALL_PACKAGES` (acceptable for personal sideloaded build).
+- [x] **Fuzzy Matching & Alias Resolution (`AppMatcher.kt`):** Normalizes app labels, matches through an alias dictionary ("insta", "wa", "yt", "calc", "cam", "browser", etc.), and uses Levenshtein distance for misheard/spoken variations. Returns `Ambiguous` if multiple apps match closely.
+- [x] **Local Label Resolution Security Rule:** Package names are strictly resolved on-device from the matched app label; speech transcripts / LLMs never supply raw package names directly.
+- [x] **App Exclusion Settings (`AppExclusionRepository.kt` & `AppExclusionScreen.kt`):** User settings screen with real-time search and toggle switches to exclude sensitive apps (e.g. banking, payment, private messengers) from voice launch.
+- [x] **Clarification & Disambiguation (`IntentEngine.kt`):** Disambiguates close app matches ("Did you mean WhatsApp or WhatsApp Business?") via `open_app_choice`.
+- [x] **Unit Tests (`AppMatcherTest.kt`):** 55/55 unit tests passing covering exact, alias, fuzzy, ambiguous ties, and non-existent apps.
+- [x] **Device Deployed:** Built and installed on Samsung Galaxy A14 5G (`RZCW60PWC7J`).
+
+---
 
 ---
 
