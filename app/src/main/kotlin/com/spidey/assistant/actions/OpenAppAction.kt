@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import com.spidey.assistant.core.ActionHandler
 import com.spidey.assistant.core.ActionResult
+import com.spidey.spikes.util.SpikeLogger
+import kotlinx.coroutines.delay
 
 /**
  * Common pre-mapped apps with canonical names, package names, and popular aliases.
@@ -29,7 +31,8 @@ enum class AllowedApp(
     GALLERY("Gallery", "com.sec.android.gallery3d", listOf("photos", "pictures")),
     CALCULATOR("Calculator", "com.sec.android.app.popupcalculator", listOf("calc")),
     CLOCK("Clock", "com.sec.android.app.clockpackage", listOf("alarm", "timer")),
-    TELEGRAM("Telegram", "org.telegram.messenger", listOf("tg"))
+    TELEGRAM("Telegram", "org.telegram.messenger", listOf("tg")),
+    CONTACTS("Contacts", "com.samsung.android.app.contacts", listOf("contact", "phonebook"))
 }
 
 /**
@@ -50,9 +53,9 @@ data class OpenAppAction(
 }
 
 /**
- * Handles [OpenAppAction] safely.
- * Launches pre-mapped popular apps (WhatsApp, Chrome, YouTube, Camera, Settings, etc.)
- * or dynamically discovers and launches any other installed launcher app.
+ * Handles [OpenAppAction] safely from any background state.
+ * Uses Android 15-compliant BackgroundAppLauncher routes.
+ * Verifies that the target app is actually in the foreground before reporting success.
  * If the device is locked, returns [ActionResult.NeedsUnlock] to prompt the unlock flow.
  */
 class OpenAppHandler(
@@ -89,61 +92,75 @@ class OpenAppHandler(
             }
         }
 
-        // 2. Try launching with target package if known
-        if (targetPackage != null) {
-            val intent = pm.getLaunchIntentForPackage(targetPackage)
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                return try {
-                    context.startActivity(intent)
-                    ActionResult.Success(spokenMessage = "Opening $displayLabel.")
-                } catch (e: Exception) {
-                    ActionResult.Failure(
-                        spokenMessage = "Failed to open $displayLabel.",
-                        reason = e.message ?: "Could not start activity"
-                    )
+        // 2. If package not resolved yet, dynamic scan across all installed launcher apps
+        if (targetPackage == null) {
+            val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val resolveInfos = pm.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
+
+            // Exact match on label
+            var bestMatch = resolveInfos.firstOrNull {
+                it.loadLabel(pm).toString().trim().lowercase() == targetName
+            }
+
+            // Substring / word match
+            if (bestMatch == null) {
+                bestMatch = resolveInfos.firstOrNull {
+                    val label = it.loadLabel(pm).toString().trim().lowercase()
+                    label.contains(targetName) || targetName.contains(label)
                 }
             }
-        }
 
-        // 3. Dynamic scan across all installed launcher apps
-        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val resolveInfos = pm.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
-
-        // Exact match on label
-        var bestMatch = resolveInfos.firstOrNull {
-            it.loadLabel(pm).toString().trim().lowercase() == targetName
-        }
-
-        // Substring / word match
-        if (bestMatch == null) {
-            bestMatch = resolveInfos.firstOrNull {
-                val label = it.loadLabel(pm).toString().trim().lowercase()
-                label.contains(targetName) || targetName.contains(label)
+            if (bestMatch != null) {
+                targetPackage = bestMatch.activityInfo.packageName
+                displayLabel = bestMatch.loadLabel(pm).toString()
             }
         }
 
-        if (bestMatch != null) {
-            val pkg = bestMatch.activityInfo.packageName
-            val launchIntent = pm.getLaunchIntentForPackage(pkg)
-            if (launchIntent != null) {
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                return try {
-                    context.startActivity(launchIntent)
-                    val label = bestMatch.loadLabel(pm).toString()
-                    ActionResult.Success(spokenMessage = "Opening $label.")
-                } catch (e: Exception) {
-                    ActionResult.Failure(
-                        spokenMessage = "Failed to open ${action.appName}.",
-                        reason = e.message ?: "Could not start activity"
-                    )
-                }
+        if (targetPackage == null) {
+            return ActionResult.Failure(
+                spokenMessage = "I couldn't find ${action.appName} on your phone.",
+                reason = "App not found or not installed"
+            )
+        }
+
+        val launchIntent = pm.getLaunchIntentForPackage(targetPackage)
+        if (launchIntent == null) {
+            return ActionResult.Failure(
+                spokenMessage = "I couldn't launch $displayLabel.",
+                reason = "No launcher intent for package $targetPackage"
+            )
+        }
+
+        SpikeLogger.log("SPIDEY", "Attempting background launch for $displayLabel ($targetPackage)")
+
+        // 3. Launch via background-activity-allowed options
+        val launched = BackgroundAppLauncher.launch(context, launchIntent)
+        if (!launched) {
+            return ActionResult.Failure(
+                spokenMessage = "Failed to open $displayLabel.",
+                reason = "startActivity failed"
+            )
+        }
+
+        // 4. Verify whether target app actually reached the foreground
+        var isVerifiedInForeground = false
+        for (i in 0 until 6) {
+            delay(250)
+            if (BackgroundAppLauncher.isAppInForeground(context, targetPackage)) {
+                isVerifiedInForeground = true
+                break
             }
         }
 
-        return ActionResult.Failure(
-            spokenMessage = "I couldn't find ${action.appName} on your phone.",
-            reason = "App not found or not installed"
-        )
+        return if (isVerifiedInForeground) {
+            SpikeLogger.log("SPIDEY", "✅ Verified in foreground: $displayLabel ($targetPackage)")
+            ActionResult.Success(spokenMessage = "Opening $displayLabel.")
+        } else {
+            SpikeLogger.log("SPIDEY", "⚠️ Unverified foreground state for $displayLabel ($targetPackage)")
+            ActionResult.Failure(
+                spokenMessage = "I sent the request to open $displayLabel, but can't confirm it worked.",
+                reason = "Target app did not reach foreground within timeout"
+            )
+        }
     }
 }

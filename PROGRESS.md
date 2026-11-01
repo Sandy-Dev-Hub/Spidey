@@ -1,6 +1,6 @@
 # SPIDEY - Progress Tracker
 
-## Current Phase: Fix Round - Task 1 (Wake Word Outside App)
+## Current Phase: Fix Round - Task 2 (Background Launch)
 
 | Phase | Status | Branch | Tag |
 |---|---|---|---|
@@ -9,12 +9,29 @@
 | Phase 2 - Contact Search | **DONE** | `main` | `phase-2-done` |
 | Phase 3 - Calling and SIM | **VERIFIED ON DEVICE** | `phase-3-calling` | `phase-3-done` |
 | Multi-App & Auto-Wake Hotfix | **VERIFIED ON DEVICE** | `main` | `assistant-hotfix-done` |
-| **Fix Round: Task 1 (Wake Word Outside App)** | **BUILT & TESTED** | `phase-0-feasibility` | - |
-| Fix Round: Task 2 (Background Launch) | WAITING | - | - |
+| Fix Round: Task 1 (Wake Word Outside App) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| **Fix Round: Task 2 (Background Launch)** | **BUILT & TESTED** | `phase-0-feasibility` | - |
 | Fix Round: Task 3 (Any App By Name) | WAITING | - | - |
 | Fix Round: Task 4 (Command Routing Fix) | WAITING | - | - |
 | Fix Round: Task 5 (YouTube Search & Play) | WAITING | - | - |
 | Fix Round: Task 6 (Supported Unlock Flow) | WAITING | - | - |
+
+---
+
+## Fix Round - Task 2: Background App Launch & Foreground Verification
+
+**Goal:** While YouTube (or any app) is in front, "open WhatsApp" reliably switches to WhatsApp, and never announces success unless verified in foreground.
+
+**Completed:** 2026-10-31
+
+### Implementation Deliverables
+- [x] **Route Analysis & Exemption (`BackgroundAppLauncher.kt`):** Implemented Android 15 BAL-exempt launching using `PendingIntent` with `MODE_BACKGROUND_ACTIVITY_START_ALLOWED` backed by `SYSTEM_ALERT_WINDOW` permission.
+- [x] **Foreground Verification (`ForegroundAppVerifier` via `UsageStatsManager`):** Queries recent `ACTIVITY_RESUMED` events to verify target package reached foreground before reporting success.
+- [x] **Eliminated False-Success (`OpenAppAction.kt`):** If target app is verified within 1.5s, announces `"Opening [App]."`; if unverified, honestly announces `"I sent the request to open [App], but can't confirm it worked."`
+- [x] **Permissions Card Expansion (`HomeScreen.kt`):** Added quick status toggles for `Appear on top (SYSTEM_ALERT_WINDOW)` and `Usage Access (GET_USAGE_STATS)`.
+- [x] **Device Verified:** Permissions granted via adb, built, installed on Samsung Galaxy A14 5G.
+
+---
 
 ---
 

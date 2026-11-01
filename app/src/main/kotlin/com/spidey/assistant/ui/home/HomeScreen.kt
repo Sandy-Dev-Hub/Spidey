@@ -1,9 +1,13 @@
 package com.spidey.assistant.ui.home
 
 import android.Manifest
+import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
@@ -30,6 +34,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Mic
@@ -40,7 +45,6 @@ import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -117,6 +121,17 @@ fun HomeScreen(
         )
     }
 
+    val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        Settings.canDrawOverlays(context)
+    } else true
+
+    val hasUsagePermission = remember(isServiceRunning) {
+        val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+        val now = System.currentTimeMillis()
+        val stats = usm?.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 1000 * 60, now)
+        !stats.isNullOrEmpty()
+    }
+
     val micPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -180,7 +195,7 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Voice Assistant • Task 1 Running",
+                        text = "Voice Assistant • Task 2 Active",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -211,7 +226,7 @@ fun HomeScreen(
                 isServiceRunning = isServiceRunning
             )
 
-            // ── Task 1 Diagnostics Panel ────────────────────────────
+            // ── Task Diagnostics Panel ──────────────────────────────
             DiagnosticsPanel(
                 diagnostics = diagnostics,
                 isServiceRunning = isServiceRunning
@@ -282,7 +297,7 @@ fun HomeScreen(
 
                     Text(
                         text = if (isServiceRunning)
-                            "• Voice trigger: say \"Hey Spidey\", \"Spidey\", \"Hey Spider\", or \"Spider\"\n• Works on home screen, inside other apps, screen-off, and locked."
+                            "• Voice trigger: say \"Hey Spidey\", \"Spidey\", \"Hey Spider\", or \"Spider\"\n• Say \"open WhatsApp\" while YouTube or any app is active to switch directly."
                         else
                             "Service is stopped. Press 'Start Assistant' to begin continuous background listening.",
                         style = MaterialTheme.typography.bodySmall,
@@ -323,7 +338,7 @@ fun HomeScreen(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            Icons.Default.VolumeUp,
+                            Icons.AutoMirrored.Filled.VolumeUp,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(18.dp)
@@ -378,6 +393,31 @@ fun HomeScreen(
                         title = "Microphone (RECORD_AUDIO)",
                         isGranted = hasMicPermission,
                         onRequest = { micPermLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+                    )
+
+                    PermissionRow(
+                        title = "Appear on top (SYSTEM_ALERT_WINDOW)",
+                        isGranted = hasOverlayPermission,
+                        onRequest = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                val intent = Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}")
+                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                context.startActivity(intent)
+                            }
+                        }
+                    )
+
+                    PermissionRow(
+                        title = "Usage Access (Foreground Verification)",
+                        isGranted = hasUsagePermission,
+                        onRequest = {
+                            val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                        }
                     )
 
                     PermissionRow(
@@ -464,7 +504,7 @@ private fun DiagnosticsPanel(
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Diagnostics Panel (Task 1)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                Text("Diagnostics Panel (Task 1 & 2)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
             }
 
             // Metric 1: Service alive
@@ -646,7 +686,7 @@ private fun AssistantStatusCard(
                 Icon(
                     imageVector = when {
                         !isServiceRunning -> Icons.Default.MicOff
-                        state == AssistantState.SPEAKING -> Icons.Default.VolumeUp
+                        state == AssistantState.SPEAKING -> Icons.AutoMirrored.Filled.VolumeUp
                         state == AssistantState.LISTENING -> Icons.Default.Hearing
                         else -> Icons.Default.Mic
                     },
