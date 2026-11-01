@@ -2,9 +2,12 @@ package com.spidey.assistant.core
 
 import com.spidey.assistant.actions.AllowedApp
 import com.spidey.assistant.actions.AssistantAction
+import com.spidey.assistant.actions.CallContactAction
 import com.spidey.assistant.actions.FindContactAction
 import com.spidey.assistant.actions.GreetingAction
 import com.spidey.assistant.actions.OpenAppAction
+import com.spidey.assistant.calling.CallSessionManager
+import com.spidey.assistant.safety.ConfirmationPolicy
 
 /**
  * Local rule-based intent engine.
@@ -16,11 +19,11 @@ class IntentEngine {
         val normalized = text.trim().lowercase()
         if (normalized.isBlank()) return null
 
-        // 1. If clarifying between ambiguous options (e.g., "Which one?")
+        // 1. If clarifying between ambiguous options or confirming an action
         if (candidatesContext.isNotEmpty()) {
-            val resolvedCandidate = resolveClarification(normalized, candidatesContext)
-            if (resolvedCandidate != null) {
-                return FindContactAction(query = resolvedCandidate)
+            val clarifiedAction = handleClarification(normalized, candidatesContext)
+            if (clarifiedAction != null) {
+                return clarifiedAction
             }
         }
 
@@ -35,10 +38,78 @@ class IntentEngine {
             return openAppAction
         }
 
-        // 4. Check for Contact Search intent
+        // 4. Check for Calling intent (Phase 3)
+        val callAction = matchCall(normalized)
+        if (callAction != null) {
+            return callAction
+        }
+
+        // 5. Check for Contact Search intent (Phase 2)
         val contactAction = matchContactSearch(normalized)
         if (contactAction != null) {
             return contactAction
+        }
+
+        return null
+    }
+
+    private fun handleClarification(reply: String, candidatesContext: List<String>): AssistantAction? {
+        // A. Confirmation or Cancellation of a pending call
+        if (candidatesContext.contains("confirm_call") || (candidatesContext.contains("yes") && candidatesContext.contains("no"))) {
+            val session = CallSessionManager.getValidSession()
+            val conf = ConfirmationPolicy.evaluate(reply)
+            return when (conf) {
+                ConfirmationPolicy.ConfirmationResult.CONFIRMED -> {
+                    CallContactAction(
+                        contactQuery = session?.contactQuery ?: "",
+                        selectedNumber = session?.selectedNumber,
+                        selectedSim = session?.selectedSim,
+                        isConfirmed = true
+                    )
+                }
+                ConfirmationPolicy.ConfirmationResult.CANCELLED -> {
+                    CallContactAction(
+                        contactQuery = session?.contactQuery ?: "",
+                        isCancelled = true
+                    )
+                }
+                ConfirmationPolicy.ConfirmationResult.UNKNOWN -> null
+            }
+        }
+
+        // B. SIM account selection
+        if (candidatesContext.contains("sim_choice")) {
+            val session = CallSessionManager.getValidSession()
+            val choices = candidatesContext.filter { it != "sim_choice" }
+            val chosen = resolveClarification(reply, choices) ?: reply
+            return CallContactAction(
+                contactQuery = session?.contactQuery ?: "",
+                selectedNumber = session?.selectedNumber,
+                selectedSim = chosen
+            )
+        }
+
+        // C. Phone number selection
+        if (candidatesContext.contains("number_choice")) {
+            val session = CallSessionManager.getValidSession()
+            val choices = candidatesContext.filter { it != "number_choice" }
+            val chosen = resolveClarification(reply, choices) ?: reply
+            return CallContactAction(
+                contactQuery = session?.contactQuery ?: "",
+                selectedNumber = chosen,
+                selectedSim = session?.selectedSim
+            )
+        }
+
+        // D. Ambiguous contact resolution
+        val resolvedCandidate = resolveClarification(reply, candidatesContext)
+        if (resolvedCandidate != null) {
+            val session = CallSessionManager.getValidSession()
+            return if (session != null) {
+                CallContactAction(contactQuery = resolvedCandidate)
+            } else {
+                FindContactAction(query = resolvedCandidate)
+            }
         }
 
         return null
@@ -80,6 +151,46 @@ class IntentEngine {
         return null
     }
 
+    private fun matchCall(text: String): AssistantAction? {
+        val clean = text.replace(Regex("[^a-z0-9 +]"), " ").replace(Regex("\\s+"), " ").trim()
+
+        val callPrefixes = listOf(
+            "make a call to",
+            "place a call to",
+            "give a call to",
+            "call up",
+            "call to",
+            "call",
+            "dial",
+            "phone"
+        )
+
+        for (prefix in callPrefixes) {
+            if (clean.startsWith("$prefix ")) {
+                val remainder = clean.removePrefix("$prefix ").trim()
+                if (remainder.isNotBlank()) {
+                    return parseCallTarget(remainder)
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun parseCallTarget(target: String): CallContactAction {
+        // Check for SIM trailer: "on airtel", "on jio", "on sim 1", "using jio", etc.
+        val simPattern = Regex("^(.*?)\\s+(?:on|using|via|through)\\s+(sim\\s*\\d+|airtel.*|jio.*|vi.*|bsnl.*)$", RegexOption.IGNORE_CASE)
+        val match = simPattern.find(target)
+
+        return if (match != null) {
+            val contact = match.groupValues[1].trim()
+            val sim = match.groupValues[2].trim()
+            CallContactAction(contactQuery = contact, selectedSim = sim)
+        } else {
+            CallContactAction(contactQuery = target)
+        }
+    }
+
     private fun matchContactSearch(text: String): AssistantAction? {
         val clean = text.replace(Regex("[^a-z0-9 ]"), " ").trim()
 
@@ -99,8 +210,7 @@ class IntentEngine {
             "number for",
             "contact details for",
             "contact for",
-            "contact",
-            "call" // Call intent maps to finding contact in Phase 2
+            "contact"
         )
 
         for (prefix in prefixes) {
