@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
 import com.spidey.assistant.actions.AssistantAction
+import com.spidey.spikes.util.SpikeLogger
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Keeps pending action strictly in-memory with a 30s timeout.
  */
 object UnlockCoordinator {
+    private const val TAG = "SPIDEY"
     private var onUnlockSuccessCallback: (() -> Unit)? = null
     private var onUnlockFailedCallback: (() -> Unit)? = null
     private var pendingAction: PendingAction? = null
@@ -31,6 +33,8 @@ object UnlockCoordinator {
         onUnlockFailedCallback = onFailed
         _isAwaitingUnlock.value = true
 
+        SpikeLogger.log(TAG, "UnlockCoordinator: requestUnlock called for ${pendingAction::class.simpleName}")
+
         // 1. Physically turn the screen on using WakeLock
         try {
             val pm = context.getSystemService(PowerManager::class.java)
@@ -42,7 +46,7 @@ object UnlockCoordinator {
             wakeLock?.acquire(5000L)
         } catch (_: Exception) {}
 
-        // 2. Launch transparent UnlockActivity
+        // 2. Launch transparent UnlockActivity over keyguard
         val intent = Intent(context, UnlockActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         }
@@ -59,7 +63,10 @@ object UnlockCoordinator {
     }
 
     internal fun notifyUnlockSuccess() {
+        if (!_isAwaitingUnlock.value) return
         _isAwaitingUnlock.value = false
+        SpikeLogger.log(TAG, "UnlockCoordinator: notifyUnlockSuccess called")
+
         val current = pendingAction
         val cb = onUnlockSuccessCallback
         onUnlockSuccessCallback = null
@@ -74,7 +81,10 @@ object UnlockCoordinator {
     }
 
     internal fun notifyUnlockCancelledOrFailed() {
+        if (!_isAwaitingUnlock.value) return
         _isAwaitingUnlock.value = false
+        SpikeLogger.log(TAG, "UnlockCoordinator: notifyUnlockCancelledOrFailed called")
+
         pendingAction = null
         val cb = onUnlockFailedCallback
         onUnlockSuccessCallback = null
@@ -82,4 +92,3 @@ object UnlockCoordinator {
         cb?.invoke()
     }
 }
-

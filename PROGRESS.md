@@ -1,6 +1,6 @@
 # SPIDEY - Progress Tracker
 
-## Current Phase: Fix Round - Task 5 (YouTube Search & Play First Result)
+## Current Phase: Fix Round - Task 6 (Supported Unlock Flow)
 
 | Phase | Status | Branch | Tag |
 |---|---|---|---|
@@ -13,8 +13,39 @@
 | Fix Round: Task 2 (Background Launch) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 3 (Any App By Name) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 4 (Command Routing Fix) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
-| **Fix Round: Task 5 (YouTube Search & Play)** | **BUILT & TESTED** | `phase-0-feasibility` | - |
-| Fix Round: Task 6 (Supported Unlock Flow) | WAITING | - | - |
+| Fix Round: Task 5 (YouTube Search & Play) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| **Fix Round: Task 6 (Supported Unlock Flow)** | **BUILT & INSTALLED ON DEVICE** | `phase-0-feasibility` | - |
+
+---
+
+## Fix Round - Task 6: Supported Biometric/PIN Unlock Flow
+
+**Goal:** "unlock my phone" wakes the screen, prompts the user to enter their PIN or use their fingerprint via Android's `KeyguardManager.requestDismissKeyguard`, confirms "Unlocked.", and resumes any pending action once authenticated.
+
+**Completed:** 2026-11-01
+
+### Security Rationale (Bug 7 Prevention)
+- **STRICT RULE:** NEVER implement voice password/PIN entry. Speaking a PIN in public is a critical security vulnerability and violates platform security principles. Spidey NEVER listens for, stores, logs, or types PINs/passwords via AccessibilityService.
+- Supported unlock delegates biometric/PIN authentication strictly to the secure Android system keyguard.
+
+### Implementation Deliverables
+- [x] **Screen Wake & Keyguard Dismissal (`UnlockCoordinator.kt`):**
+  - Acquires `SCREEN_BRIGHT_WAKE_LOCK` to turn on the screen.
+  - Launches `UnlockHelperActivity` configured with `setShowWhenLocked(true)` and `setTurnScreenOn(true)`.
+  - Calls `KeyguardManager.requestDismissKeyguard` with `KeyguardDismissCallback`.
+- [x] **Dual Unlock Detection (`ACTION_USER_PRESENT` + Callback):**
+  - Handled both `KeyguardDismissCallback.onDismissSucceeded` and system broadcast `Intent.ACTION_USER_PRESENT` to guarantee detection on Samsung One UI 7.
+  - Idempotency guard prevents double execution of callbacks.
+- [x] **Voice Prompts & Seamless Resumption (`ConversationManager.kt`):**
+  - Speaks: *"Please enter your PIN or use your fingerprint."*
+  - Automatically transitions state to `AWAITING_UNLOCK`.
+  - Holds `pendingActionAfterUnlock`.
+  - When unlocked via fingerprint/PIN:
+    - If explicit unlock: Speaks *"Unlocked."*
+    - If pending action (e.g. "open WhatsApp" spoken while locked): immediately executes the action without asking again.
+- [x] **Unit Tests (`UnlockHandlerTest.kt`):**
+  - Unit tests verifying locked state, already unlocked state, and prompted unlock state pass cleanly.
+
 
 ---
 

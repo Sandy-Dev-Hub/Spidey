@@ -6,7 +6,7 @@ import com.spidey.assistant.core.ActionResult
 /**
  * Action representing an explicit system request to unlock the device.
  */
-data object UnlockAction : AssistantAction
+data class UnlockAction(val wasPrompted: Boolean = false) : AssistantAction
 
 /**
  * Handles [UnlockAction] by requesting device keyguard dismissal.
@@ -21,8 +21,11 @@ class UnlockHandler(
         return if (isDeviceLocked()) {
             ActionResult.NeedsUnlock
         } else {
-            ActionResult.Success(spokenMessage = "Phone is already unlocked.")
+            if (action.wasPrompted) {
+                ActionResult.Success(spokenMessage = "Unlocked.")
+            } else {
+                ActionResult.Success(spokenMessage = "Phone is already unlocked.")
+            }
         }
     }
 }
-

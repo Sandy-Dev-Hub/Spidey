@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -66,11 +68,28 @@ class WakeWordService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
 
+    private val userPresentReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_USER_PRESENT) {
+                SpikeLogger.log("SPIDEY", "Received ACTION_USER_PRESENT broadcast")
+                UnlockCoordinator.notifyUnlockSuccess()
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         SpikeLogger.log("SPIDEY", "Creating WakeWordService (Android 15 Foreground Service)")
         createNotificationChannel()
         acquireWakeLock()
+
+        // Register for system unlock broadcast
+        try {
+            val filter = IntentFilter(Intent.ACTION_USER_PRESENT)
+            registerReceiver(userPresentReceiver, filter)
+        } catch (e: Exception) {
+            SpikeLogger.log("SPIDEY", "Failed to register userPresentReceiver: ${e.message}")
+        }
 
         val db = SpideyDatabase.getInstance(this)
         val permManager = PermissionManager(this)
@@ -282,29 +301,34 @@ class WakeWordService : Service() {
         val stopIntent = PendingIntent.getService(
             this,
             1,
-            Intent(this, WakeWordService::class.java).apply { action = ACTION_STOP },
+            Intent(this, WakeWordService::class.java).apply {
+                action = ACTION_STOP
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val statusText = when (state) {
-            AssistantState.SLEEPING -> "Listening for \"Hey Spidey\" / \"Spider\"..."
-            AssistantState.LISTENING -> "Listening to your command..."
-            AssistantState.PROCESSING -> "Processing command..."
-            AssistantState.AWAITING_CONFIRMATION -> "Waiting for confirmation..."
-            AssistantState.AWAITING_UNLOCK -> "Waiting for device unlock..."
-            AssistantState.EXECUTING -> "Executing action..."
+        val stateText = when (state) {
+            AssistantState.SLEEPING -> "Listening for 'Hey Spidey'..."
+            AssistantState.LISTENING -> "Listening to your request..."
+            AssistantState.PROCESSING -> "Thinking..."
+            AssistantState.EXECUTING -> "Taking action..."
             AssistantState.SPEAKING -> "Speaking..."
-            AssistantState.ERROR -> "Encountered an issue"
+            AssistantState.AWAITING_UNLOCK -> "Waiting for device unlock..."
+            AssistantState.AWAITING_CONFIRMATION -> "Waiting for confirmation..."
+            AssistantState.ERROR -> "An error occurred."
+            else -> "Active"
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("SPIDEY Voice Assistant")
-            .setContentText(statusText)
+            .setContentText(stateText)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentIntent(openAppIntent)
             .setOngoing(true)
+            .setContentIntent(openAppIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
     }
 
@@ -312,10 +336,10 @@ class WakeWordService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "SPIDEY Voice Assistant",
+                "SPIDEY Foreground Assistant",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows the active status of SPIDEY voice assistant"
+                description = "Shows live status of SPIDEY continuous voice listener"
                 setShowBadge(false)
             }
             val nm = getSystemService(NotificationManager::class.java)
@@ -324,6 +348,10 @@ class WakeWordService : Service() {
     }
 
     private fun stopAssistant() {
+        try {
+            unregisterReceiver(userPresentReceiver)
+        } catch (_: Exception) {}
+
         releaseWakeLock()
         _isServiceRunning.value = false
         _activeManager.value = null

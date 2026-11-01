@@ -2,6 +2,7 @@ package com.spidey.assistant.core
 
 import com.spidey.assistant.actions.AssistantAction
 import com.spidey.assistant.actions.StopAction
+import com.spidey.assistant.actions.UnlockAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -227,9 +228,7 @@ class ConversationManager(
             mutex.withLock {
                 val action = pendingActionAfterUnlock ?: return@withLock
                 pendingActionAfterUnlock = null
-                if (_state.value == AssistantState.AWAITING_UNLOCK) {
-                    executeAction(action)
-                }
+                executeAction(action)
             }
         }
     }
@@ -274,10 +273,14 @@ class ConversationManager(
                 }
             }
             is ActionResult.NeedsUnlock -> {
-                pendingActionAfterUnlock = action
-                speakResponse("Please unlock your phone to continue.") {
+                pendingActionAfterUnlock = if (action is UnlockAction) {
+                    UnlockAction(wasPrompted = true)
+                } else {
+                    action
+                }
+                onUnlockRequested(action)
+                speakResponse("Please enter your PIN or use your fingerprint.") {
                     _state.value = AssistantState.AWAITING_UNLOCK
-                    onUnlockRequested(action)
                 }
             }
             is ActionResult.Failure -> {

@@ -52,7 +52,7 @@ class IntentEngine {
 
         // 2b. Unlock command ("unlock my phone", "unlock the phone", "unlock phone", "unlock")
         if (isUnlockCommand(normalized)) {
-            return UnlockAction
+            return UnlockAction()
         }
 
         // 2c. Time or Date request (e.g. "what is the time now", "what is today's date")
