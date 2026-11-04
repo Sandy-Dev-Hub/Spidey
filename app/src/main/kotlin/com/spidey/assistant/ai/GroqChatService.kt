@@ -22,7 +22,8 @@ import java.net.URL
  * - No audio, contacts, phone numbers, or personal app data are ever transmitted.
  */
 class GroqChatService(
-    private val apiKey: String = BuildConfig.GROQ_API_KEY
+    private val apiKey: String = BuildConfig.GROQ_API_KEY,
+    private val model: String = "openai/gpt-oss-20b"
 ) {
     private val history = mutableListOf<Pair<String, String>>() // user, assistant
 
@@ -78,7 +79,7 @@ class GroqChatService(
             }
 
             val requestJson = JSONObject().apply {
-                put("model", "llama-3.3-70b-versatile")
+                put("model", model)
                 put("messages", messagesArray)
                 put("temperature", 0.7)
                 put("max_tokens", 80)
@@ -109,6 +110,12 @@ class GroqChatService(
                     SpikeLogger.log("SPIDEY", "Groq AI reply: \"$reply\"")
                     return@withContext reply
                 }
+            } else if (responseCode == 429) {
+                Log.w(TAG, "Groq API rate limit (429)")
+                return@withContext "Whoa bro, slow down a bit! Hit the rate limit, give me a second."
+            } else if (responseCode == 401 || responseCode == 403) {
+                Log.w(TAG, "Groq API authentication error ($responseCode)")
+                return@withContext "Bro, my Groq API key isn't working. Please check local properties."
             } else {
                 val errText = conn.errorStream?.bufferedReader()?.use { it.readText() }
                 Log.w(TAG, "Groq API error ($responseCode): $errText")
