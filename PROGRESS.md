@@ -11,7 +11,9 @@
 | Multi-App & Auto-Wake Hotfix | **VERIFIED ON DEVICE** | `main` | `assistant-hotfix-done` |
 | Fix Round: Task 1 (Wake Word Outside App) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round 2: Task 1 (Wake Word Robust Startup) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
-| Fix Round 2: Task 2 (Far-Field Hearing) | **IN PROGRESS** | `phase-0-feasibility` | - |
+| Fix Round 2: Task 2 (Far-Field Hearing) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| Fix Round 2: Task 6 (Male Bro Voice & Personality) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| Fix Round 2: Task 7 (AI Friend Chat) | **IN PROGRESS** | `phase-0-feasibility` | - |
 | Fix Round: Task 2 (Background Launch) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 3 (Any App By Name) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 4 (Command Routing Fix) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
