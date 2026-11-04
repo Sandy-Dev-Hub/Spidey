@@ -130,9 +130,11 @@ class WakeWordEngine(
         val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         val bufferSizeInShorts = maxOf(minBufferSize / 2, 3200) // 0.2s = 3200 shorts (5 fps nominal)
 
+        // Use MediaRecorder.AudioSource.MIC with hardware AGC/NS if available,
+        // which does NOT gate out or attenuate far-field speech like VOICE_RECOGNITION does on Samsung devices
         val record = try {
             AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.MIC,
                 sampleRate,
                 channelConfig,
                 audioFormat,
@@ -140,7 +142,7 @@ class WakeWordEngine(
             )
         } catch (_: Exception) {
             AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 sampleRate,
                 channelConfig,
                 audioFormat,
@@ -157,6 +159,23 @@ class WakeWordEngine(
         }
 
         audioRecord = record
+
+        // Attach AcousticEchoCanceler and AutomaticGainControl if supported by device
+        try {
+            val audioSessionId = record.audioSessionId
+            if (android.media.audiofx.AutomaticGainControl.isAvailable()) {
+                val agc = android.media.audiofx.AutomaticGainControl.create(audioSessionId)
+                agc?.enabled = true
+                SpikeLogger.log("SPIDEY", "Hardware AutomaticGainControl enabled for far-field capture")
+            }
+            if (android.media.audiofx.NoiseSuppressor.isAvailable()) {
+                val ns = android.media.audiofx.NoiseSuppressor.create(audioSessionId)
+                ns?.enabled = true
+                SpikeLogger.log("SPIDEY", "Hardware NoiseSuppressor enabled for far-field capture")
+            }
+        } catch (e: Exception) {
+            SpikeLogger.log("SPIDEY", "Audio effects init exception: ${e.message}")
+        }
 
         recordThread = Thread({
             try {
