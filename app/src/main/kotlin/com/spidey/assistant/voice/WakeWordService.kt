@@ -1,5 +1,6 @@
 package com.spidey.assistant.voice
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -16,6 +17,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.spidey.assistant.actions.CallActionHandler
@@ -267,6 +269,10 @@ class WakeWordService : Service() {
             stopAssistant()
             return START_NOT_STICKY
         }
+        // ACTION_START or null (normal start) — just ensure wake lock is held
+        if (action == ACTION_START) {
+            SpikeLogger.log("SPIDEY", "Received ACTION_START intent (notification or tile)")
+        }
         acquireWakeLock()
         return START_STICKY
     }
@@ -308,6 +314,15 @@ class WakeWordService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val startIntent = PendingIntent.getService(
+            this,
+            2,
+            Intent(this, WakeWordService::class.java).apply {
+                action = ACTION_START
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         val stateText = when (state) {
             AssistantState.SLEEPING -> "Listening for 'Hey Spidey'..."
             AssistantState.LISTENING -> "Listening to your request..."
@@ -326,6 +341,7 @@ class WakeWordService : Service() {
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .setContentIntent(openAppIntent)
+            .addAction(android.R.drawable.ic_btn_speak_now, "Start", startIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -343,8 +359,18 @@ class WakeWordService : Service() {
                 description = "Shows live status of SPIDEY continuous voice listener"
                 setShowBadge(false)
             }
+            // Restart prompt channel (shown by BootReceiver when direct start is blocked)
+            val restartChannel = NotificationChannel(
+                RESTART_CHANNEL_ID,
+                "SPIDEY Restart Prompt",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Tap to restart SPIDEY voice listener"
+                setShowBadge(true)
+            }
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)
+            nm.createNotificationChannel(restartChannel)
         }
     }
 
@@ -375,11 +401,36 @@ class WakeWordService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Samsung One UI: swiping from Recents sends a force-stop signal.
+     * Schedule a 3-second AlarmManager restart so the service can recover
+     * as long as the app was NOT explicitly force-stopped by the user in Settings.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        SpikeLogger.log("SPIDEY", "onTaskRemoved – scheduling AlarmManager restart in 3s")
+        val restartIntent = PendingIntent.getService(
+            this,
+            99,
+            Intent(this, WakeWordService::class.java).apply { action = ACTION_START },
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        am.set(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + 3_000L,
+            restartIntent
+        )
+    }
+
     companion object {
         private const val TAG = "WakeWordService"
         const val CHANNEL_ID = "spidey_voice_assistant_channel"
         const val NOTIFICATION_ID = 2001
         const val ACTION_STOP = "com.spidey.assistant.ACTION_STOP"
+        const val ACTION_START = "com.spidey.assistant.ACTION_START"
+        const val RESTART_NOTIFICATION_ID = 2002
+        const val RESTART_CHANNEL_ID = "spidey_restart_channel"
 
         private val _isServiceRunning = MutableStateFlow(false)
         val isServiceRunning = _isServiceRunning.asStateFlow()
@@ -404,6 +455,50 @@ class WakeWordService : Service() {
                 action = ACTION_STOP
             }
             context.startService(intent)
+        }
+
+        /**
+         * Posts a high-priority "Tap to start SPIDEY" notification.
+         * Used by BootReceiver because Android 15 blocks direct startForegroundService
+         * from a BOOT_COMPLETED receiver that does not have a BFSL exemption.
+         * The user taps the notification → startForegroundService fires from foreground context.
+         */
+        fun postRestartNotification(context: Context, reason: String) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+            // Ensure channel exists
+            if (nm.getNotificationChannel(RESTART_CHANNEL_ID) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        RESTART_CHANNEL_ID,
+                        "SPIDEY Restart Prompt",
+                        NotificationManager.IMPORTANCE_HIGH
+                    ).apply { description = "Tap to restart SPIDEY voice listener" }
+                )
+            }
+
+            val tapIntent = PendingIntent.getForegroundService(
+                context,
+                200,
+                Intent(context, WakeWordService::class.java).apply { action = ACTION_START },
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(context, RESTART_CHANNEL_ID)
+                .setContentTitle("SPIDEY is not listening")
+                .setContentText("Tap to start: $reason")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setAutoCancel(true)
+                .setContentIntent(tapIntent)
+                .addAction(android.R.drawable.ic_btn_speak_now, "Start Listening", tapIntent)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .build()
+
+            nm.notify(RESTART_NOTIFICATION_ID, notification)
+            Log.i("WakeWordService", "postRestartNotification posted: $reason")
         }
     }
 }
