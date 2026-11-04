@@ -144,7 +144,7 @@ class WakeWordService : Service() {
         actionRouter = ActionRouter().apply {
             register(GreetingHandler())
             register(StopHandler())
-            register(TimeHandler())
+            register(TimeHandler(this@WakeWordService))
             register(UnlockHandler {
                 val km = getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
                 km?.isDeviceLocked == true
