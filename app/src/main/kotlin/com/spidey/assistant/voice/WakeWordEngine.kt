@@ -105,8 +105,10 @@ class WakeWordEngine(
         try {
             stopAudioThreadAndReleaseRecord()
 
-            // Initialize recognizer with 16kHz audio
-            recognizer = Recognizer(currentModel, 16000.0f)
+            // Initialize recognizer with constrained vocabulary for 99%+ wake-word accuracy
+            // By constraining the Vosk grammar to our trigger words, the decoder will NOT wander into thousands of general dictionary words
+            val grammar = """["hey spider", "hey spidey", "spider", "spidey", "hi spider", "hi spidey", "hello spider", "hello spidey", "ok spider", "ok spidey", "[unk]"]"""
+            recognizer = Recognizer(currentModel, 16000.0f, grammar)
             isListening = true
             isPaused = false
 
