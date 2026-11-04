@@ -352,14 +352,19 @@ class WakeWordEngine(
 
         val wakeKeywords = setOf(
             "spider", "spidey", "spidy", "spyder", "spydar", "spida", "speeder", "speedy",
-            "spide", "spidee", "friday", "priday", "spider man", "spiderman"
+            "spide", "spidee", "friday", "priday", "spider man", "spiderman",
+            "spy", "spite", "spied", "spiders", "spiteful", "snyder", "slider", "strike",
+            "fighter", "tighter", "lighter", "cider", "hyper", "cyber", "spader"
         )
 
         if (words.any { it in wakeKeywords }) return true
         if (clean.contains("spider") || clean.contains("spidey") || clean.contains("spyder") ||
             clean.contains("spidy") || clean.contains("spida") || clean.contains("speeder") ||
             clean.contains("speedy") || clean.contains("spy der") || clean.contains("spy the") ||
-            clean.contains("hey speeder") || clean.contains("by the") || clean.contains("hey spider")
+            clean.contains("hey speeder") || clean.contains("by the") || clean.contains("hey spider") ||
+            clean.contains("hey spy") || clean.contains("a spy") || clean.contains("hi spy") ||
+            clean.contains("spy day") || clean.contains("spy dee") || clean.contains("spy the") ||
+            clean.contains("hi spider") || clean.contains("hey spidy") || clean.contains("hey cyber")
         ) {
             return true
         }
