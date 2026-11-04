@@ -103,8 +103,28 @@ class IntentEngine {
             return contactAction
         }
 
-        // 6. Fallback: Return null so Spidey speaks "I didn't understand that."
-        // NEVER type raw transcript into active fields!
+        // 6. Conversational / Chat:
+        // When user asks conversational questions, advice, vents, or chats
+        val chatAction = matchChat(normalized, text)
+        if (chatAction != null) {
+            return chatAction
+        }
+
+        // 7. Fallback: Return null for pure gibberish / unrecognized noise
+        return null
+    }
+
+    private fun matchChat(normalized: String, originalText: String): AssistantAction? {
+        val chatPatterns = listOf(
+            "ruin", "sad", "happy", "bored", "angry", "tired", "depress", "friend", "bro", "buddy",
+            "how are you", "what are you doing", "who are you", "what can you do", "tell me a joke",
+            "joke", "fun", "advise", "advice", "help me think", "what do you think",
+            "can you talk", "talk to me", "i feel", "my day", "today was",
+            "feeling", "cheer me up", "i am sad", "i am happy", "i am bored", "i am tired"
+        )
+        if (chatPatterns.any { normalized.contains(it) }) {
+            return com.spidey.assistant.actions.ChatAction(originalText.trim())
+        }
         return null
     }
 

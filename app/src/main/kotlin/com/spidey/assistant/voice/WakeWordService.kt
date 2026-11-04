@@ -154,6 +154,7 @@ class WakeWordService : Service() {
             register(SearchYouTubeHandler(this@WakeWordService))
             register(FindContactHandler(contactRepository))
             register(CallActionHandler(contactRepository, callingAccountRepository, callCoordinator, permManager))
+            register(com.spidey.assistant.actions.ChatHandler())
         }
 
         intentEngine = IntentEngine()

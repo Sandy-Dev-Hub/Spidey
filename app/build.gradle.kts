@@ -32,6 +32,11 @@ android {
             "PICOVOICE_ACCESS_KEY",
             "\"${localProps.getProperty("picovoice.accessKey", "")}\""
         )
+        buildConfigField(
+            "String",
+            "GROQ_API_KEY",
+            "\"${localProps.getProperty("GROQ_API_KEY", "")}\""
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
