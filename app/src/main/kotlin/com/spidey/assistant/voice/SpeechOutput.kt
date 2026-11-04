@@ -30,21 +30,33 @@ class SpeechOutput(
                     tts?.language = Locale.ENGLISH
                 }
 
-                // Tune pitch and speech rate for a natural, slightly deeper friendly male voice
-                tts?.setPitch(0.88f) // Slightly lower, warm male timbre
-                tts?.setSpeechRate(1.05f) // Conversational, energetic tempo
+                // Enforce clear, deep friendly male acoustics
+                tts?.setPitch(0.78f) // Substantially deeper male pitch (0.78 vs 1.0 default female/neutral)
+                tts?.setSpeechRate(0.98f) // Natural human cadence
 
-                // Best-effort selection of male voice if available in system TTS voices
+                // Force selection of male voice by scanning voice attributes
                 try {
                     val voices = tts?.voices
-                    val maleVoice = voices?.firstOrNull { voice ->
-                        val name = voice.name.lowercase()
-                        (name.contains("male") || name.contains("man") || name.contains("en-in-x-c") || name.contains("en-in-x-d") || name.contains("en-us-x-sfg") || name.contains("en-us-x-iom")) &&
-                                !name.contains("female")
-                    }
-                    if (maleVoice != null) {
-                        tts?.voice = maleVoice
-                        Log.i("SpeechOutput", "Selected male voice: ${maleVoice.name}")
+                    if (voices != null) {
+                        for (v in voices) {
+                            Log.d("SpeechOutput", "Available TTS voice: ${v.name} (locale=${v.locale})")
+                        }
+                        // Priority order for male voice identifiers in Google TTS
+                        val maleVoice = voices.firstOrNull { v ->
+                            val n = v.name.lowercase()
+                            (n.contains("en-in-x-cnd") || n.contains("en-in-x-c") || n.contains("en-in-x-d") ||
+                             n.contains("en-us-x-sfg") || n.contains("en-us-x-iom") || n.contains("en-us-x-iol") ||
+                             n.contains("male") || n.contains("man")) &&
+                            !n.contains("female") && !n.contains("woman")
+                        } ?: voices.firstOrNull { v ->
+                            val n = v.name.lowercase()
+                            !n.contains("female") && !n.contains("woman") && v.locale.language == "en"
+                        }
+
+                        if (maleVoice != null) {
+                            tts?.voice = maleVoice
+                            Log.i("SpeechOutput", "Set TTS male voice to: ${maleVoice.name}")
+                        }
                     }
                 } catch (e: Exception) {
                     Log.w("SpeechOutput", "Voice selection exception: ${e.message}")

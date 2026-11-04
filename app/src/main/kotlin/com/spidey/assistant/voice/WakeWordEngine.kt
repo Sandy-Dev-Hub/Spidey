@@ -190,10 +190,10 @@ class WakeWordEngine(
                             )
                         }
 
-                        // Apply far-field software gain boost (~2.5x) with soft clamp
-                        // to increase wake word detection distance while phone is resting across the room
+                        // Apply far-field software gain boost (~4.0x / +12 dB) with soft clamp
+                        // to reliably pick up wake word from a distance
                         for (i in 0 until read) {
-                            val boosted = (shortBuffer[i] * 2.5f).toInt()
+                            val boosted = (shortBuffer[i] * 4.0f).toInt()
                             shortBuffer[i] = boosted.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
                         }
 
