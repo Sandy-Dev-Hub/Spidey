@@ -29,6 +29,26 @@ class SpeechOutput(
                 if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                     tts?.language = Locale.ENGLISH
                 }
+
+                // Tune pitch and speech rate for a natural, slightly deeper friendly male voice
+                tts?.setPitch(0.88f) // Slightly lower, warm male timbre
+                tts?.setSpeechRate(1.05f) // Conversational, energetic tempo
+
+                // Best-effort selection of male voice if available in system TTS voices
+                try {
+                    val voices = tts?.voices
+                    val maleVoice = voices?.firstOrNull { voice ->
+                        val name = voice.name.lowercase()
+                        (name.contains("male") || name.contains("man") || name.contains("en-in-x-c") || name.contains("en-in-x-d") || name.contains("en-us-x-sfg") || name.contains("en-us-x-iom")) &&
+                                !name.contains("female")
+                    }
+                    if (maleVoice != null) {
+                        tts?.voice = maleVoice
+                        Log.i("SpeechOutput", "Selected male voice: ${maleVoice.name}")
+                    }
+                } catch (e: Exception) {
+                    Log.w("SpeechOutput", "Voice selection exception: ${e.message}")
+                }
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
 

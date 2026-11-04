@@ -2,6 +2,7 @@ package com.spidey.assistant.actions
 
 import com.spidey.assistant.core.ActionHandler
 import com.spidey.assistant.core.ActionResult
+import com.spidey.assistant.personality.SpideyPersona
 
 /**
  * Action representing a spoken greeting or general polite opening.
@@ -9,14 +10,15 @@ import com.spidey.assistant.core.ActionResult
 data class GreetingAction(val queryText: String = "") : AssistantAction
 
 /**
- * Handles [GreetingAction] by returning a polite spoken reply.
+ * Handles [GreetingAction] with a friendly, casual persona.
  */
 class GreetingHandler(
-    private val greetingResponse: String = "Hello! Spidey is listening."
+    private val greetingResponse: String? = null
 ) : ActionHandler<GreetingAction> {
     override val actionType: Class<GreetingAction> = GreetingAction::class.java
 
     override suspend fun handle(action: GreetingAction): ActionResult {
-        return ActionResult.Success(spokenMessage = greetingResponse)
+        val reply = greetingResponse ?: SpideyPersona.greeting()
+        return ActionResult.Success(spokenMessage = reply)
     }
 }

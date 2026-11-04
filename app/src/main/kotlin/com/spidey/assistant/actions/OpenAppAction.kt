@@ -148,7 +148,8 @@ class OpenAppHandler(
 
         return if (isVerifiedInForeground) {
             SpikeLogger.log("SPIDEY", "✅ Verified in foreground: ${targetApp.label} (${targetApp.packageName})")
-            ActionResult.Success(spokenMessage = "Opening ${targetApp.label}.")
+            val message = com.spidey.assistant.personality.SpideyPersona.appOpening(targetApp.label)
+            ActionResult.Success(spokenMessage = message)
         } else {
             SpikeLogger.log("SPIDEY", "⚠️ Unverified foreground state for ${targetApp.label} (${targetApp.packageName})")
             ActionResult.Failure(

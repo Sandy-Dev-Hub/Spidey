@@ -41,10 +41,10 @@ class TimeHandler(private val context: Context? = null) : ActionHandler<TimeActi
         val now = Date()
         val message = if (action.isDateOnly) {
             val sdf = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault())
-            "Today is ${sdf.format(now)}."
+            com.spidey.assistant.personality.SpideyPersona.dateResponse(sdf.format(now))
         } else {
             val sdf = SimpleDateFormat("h:mm a", Locale.getDefault())
-            "The time is ${sdf.format(now)}."
+            com.spidey.assistant.personality.SpideyPersona.timeResponse(sdf.format(now))
         }
         return ActionResult.Success(spokenMessage = message)
     }
