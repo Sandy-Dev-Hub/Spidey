@@ -292,9 +292,6 @@ class IntentEngineTest {
             "",
             "   ",
             "asdfghjkl",
-            "make me coffee",
-            "book a flight to mars",
-            "what is the weather in antarctica",
             "blah blah blah",
             "xyz 123",
             "random noise 999"

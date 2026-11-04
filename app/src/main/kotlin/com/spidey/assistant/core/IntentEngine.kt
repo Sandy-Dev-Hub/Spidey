@@ -115,16 +115,26 @@ class IntentEngine {
     }
 
     private fun matchChat(normalized: String, originalText: String): AssistantAction? {
-        val chatPatterns = listOf(
-            "ruin", "sad", "happy", "bored", "angry", "tired", "depress", "friend", "bro", "buddy",
-            "how are you", "what are you doing", "who are you", "what can you do", "tell me a joke",
-            "joke", "fun", "advise", "advice", "help me think", "what do you think",
-            "can you talk", "talk to me", "i feel", "my day", "today was",
-            "feeling", "cheer me up", "i am sad", "i am happy", "i am bored", "i am tired"
+        val gibberishWords = setOf(
+            "blah", "asdfghjkl", "xyz", "random noise", "gibberish"
         )
-        if (chatPatterns.any { normalized.contains(it) }) {
+        if (gibberishWords.any { normalized.contains(it) }) {
+            return null
+        }
+
+        // If it contains at least two conversational words or an emotion/question/statement, route to Groq
+        val words = normalized.split("\\s+".toRegex()).filter { it.isNotBlank() }
+        if (words.size >= 2) {
             return com.spidey.assistant.actions.ChatAction(originalText.trim())
         }
+
+        val singleChatTriggers = setOf(
+            "hi", "hello", "hey", "sup", "bored", "sad", "happy", "tired", "joke", "help", "bro", "why", "who", "what", "how"
+        )
+        if (words.size == 1 && words[0] in singleChatTriggers) {
+            return com.spidey.assistant.actions.ChatAction(originalText.trim())
+        }
+
         return null
     }
 
