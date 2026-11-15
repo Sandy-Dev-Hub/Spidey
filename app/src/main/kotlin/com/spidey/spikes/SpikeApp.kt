@@ -13,6 +13,7 @@ class SpikeApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.spidey.assistant.engine.FeatureFlags.init(this)
         createNotificationChannels()
     }
 
