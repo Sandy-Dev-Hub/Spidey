@@ -211,7 +211,7 @@ class WakeWordService : Service() {
                     onFailed = { conversationManager.stop() }
                 )
             },
-            followUpTimeoutMs = 8_000L
+            followUpTimeoutMs = com.spidey.assistant.engine.FeatureFlags.sessionTimeoutMs
         )
 
         _activeManager.value = conversationManager

@@ -89,6 +89,7 @@ class ConversationManager(
                     return@withLock
                 }
 
+                val isNewSession = !isSessionActive
                 if (followUpTimeoutMs > 0L) {
                     isSessionActive = true
                     resetSessionTimeout()
@@ -122,16 +123,29 @@ class ConversationManager(
                     }
                 }
 
-                _state.value = AssistantState.LISTENING
-
-                // 2. Play acoustic prompt cue (beep or tone)
-                playPromptSound()
-
-                // Delay to ensure mic hardware finishes releasing and prompt tone sounds
-                kotlinx.coroutines.delay(250)
-
-                // 3. Start bounded speech recognition
-                onStartSpeechListeningRequested()
+                // If followUpTimeoutMs is enabled (active session mode), greet with bro greeting on fresh wake
+                if (followUpTimeoutMs > 0L) {
+                    if (isNewSession) {
+                        val greeting = com.spidey.assistant.personality.SpideyPersona.randomGreeting()
+                        speakResponse(greeting) {
+                            _state.value = AssistantState.LISTENING
+                            if (isSessionActive) {
+                                onStartSpeechListeningRequested()
+                            }
+                        }
+                    } else {
+                        // Session already active: NO greeting, NO beep — keep listening silently
+                        _state.value = AssistantState.LISTENING
+                        kotlinx.coroutines.delay(100)
+                        onStartSpeechListeningRequested()
+                    }
+                } else {
+                    // Backward-compatible single-turn mode (followUpTimeoutMs = 0)
+                    _state.value = AssistantState.LISTENING
+                    playPromptSound()
+                    kotlinx.coroutines.delay(250)
+                    onStartSpeechListeningRequested()
+                }
             }
         }
     }

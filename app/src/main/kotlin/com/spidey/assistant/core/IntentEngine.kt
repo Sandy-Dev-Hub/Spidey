@@ -228,10 +228,11 @@ class IntentEngine {
     }
 
     private fun isStopCommand(text: String): Boolean {
-        val clean = text.replace(Regex("[^a-z0-9 ]"), "").trim()
+        val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
         val stopPhrases = setOf(
             "stop", "cancel", "bye", "goodbye", "sleep", "shut down", "go to sleep",
-            "exit", "close", "turn off", "quit", "stop listening", "stop assistant"
+            "exit", "close", "turn off", "quit", "stop listening", "stop assistant",
+            "that s all", "thats all", "that is all", "thanks", "thank you", "i m done", "im done"
         )
         return clean in stopPhrases
     }
@@ -254,6 +255,24 @@ class IntentEngine {
 
     private fun matchPlayOrdinal(text: String, previousSearchQuery: String?, isYouTubeContext: Boolean): PlayFirstResultAction? {
         var clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+
+        // Handle "change song", "different song", "next song", "play another song", "i don't like this song change it"
+        val changePhrases = listOf(
+            "change song", "change the song", "change this song", "next song", "play next song", "next video",
+            "play another song", "different song", "play a different song", "another song", "skip song"
+        )
+        val expressesDislikeOrChange = changePhrases.any { clean.contains(it) } ||
+                ((clean.contains("dont like") || clean.contains("don t like") || clean.contains("hate")) &&
+                        (clean.contains("change") || clean.contains("next") || clean.contains("another") || clean.contains("different") || clean.contains("song")))
+
+        if (expressesDislikeOrChange) {
+            // Default to next result (itemIndex 2 or subsequent)
+            return PlayFirstResultAction(
+                query = previousSearchQuery ?: "trending songs",
+                targetApp = "youtube",
+                itemIndex = 2
+            )
+        }
 
         val searchSuffixes = listOf(
             "on the search results", "in the search results", "from the search results",
@@ -620,6 +639,10 @@ class IntentEngine {
         val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
         if (words.isEmpty()) return null
 
+        // Specific play-app requests (e.g. "play spotify" -> opens Spotify, not YouTube!)
+        if (clean == "play spotify" || clean == "play on spotify") {
+            return OpenAppAction(AllowedApp.SPOTIFY)
+        }
         if (clean == "play youtube") {
             return OpenAppAction(AllowedApp.YOUTUBE)
         }
@@ -632,7 +655,7 @@ class IntentEngine {
         var candidateAppName: String? = null
 
         val nonAppPrefixes = listOf(
-            "search bar", "search", "play", "find", "look for", "listen to", "call"
+            "search bar", "search", "find", "look for", "listen to", "call"
         )
 
         // 1. Starts with an explicit open trigger
