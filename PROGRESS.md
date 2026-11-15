@@ -1,6 +1,6 @@
 # SPIDEY - Progress Tracker
 
-## Current Phase: Fix Round - Task 6 (Supported Unlock Flow)
+## Current Phase: Jarvis Upgrade - Task J2 Music Routing & Clarification Fixes
 
 | Phase | Status | Branch | Tag |
 |---|---|---|---|
@@ -13,12 +13,42 @@
 | Fix Round 2: Task 1 (Wake Word Robust Startup) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round 2: Task 2 (Far-Field Hearing) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round 2: Task 6 (Male Bro Voice & Personality) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
-| Fix Round 2: Task 7 (AI Friend Chat) | **IN PROGRESS** | `phase-0-feasibility` | - |
+| Fix Round 2: Task 7 (AI Friend Chat) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| Task J0 & J1: Groq AI Chat Engine & Architecture | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| Task J2: Calm Active Session & Bro Persona | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| Task J2 Follow-up: Music Clarification & Next Song Counter | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 2 (Background Launch) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 3 (Any App By Name) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 4 (Command Routing Fix) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 5 (YouTube Search & Play) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 6 (Supported Unlock Flow) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+
+---
+
+## Jarvis Upgrade: Music Clarification & Consecutive Change Counter Fixes
+
+**Goal:**
+1. Saying generic "play song", "play a song", "play music" asks *"What song would you like me to play, bro?"* instead of launching a random search query.
+2. Answering with any song name plays that song immediately.
+3. Saying "change the song" / "next song" repeatedly increments through subsequent songs (2nd -> 3rd -> 4th -> ...) rather than remaining stuck on the 2nd result.
+
+**Completed:** 2026-11-15
+
+### Implementation Deliverables
+- [x] **Music Clarification Prompt (`SearchYouTubeAction.kt`, `IntentEngine.kt`):**
+  - Added `GENERIC_MUSIC_QUERIES` filter (`song`, `a song`, `the song`, `music`, `some music`, etc.).
+  - Returns `ActionResult.NeedsClarification(question = "What song would you like me to play, bro?", candidates = listOf("music_query_choice"))`.
+  - In `IntentEngine.handleClarification`, user response is stripped of conversational verbs and routed directly as `SearchYouTubeAction(query = response, isPlayDirectly = true)`.
+- [x] **Consecutive "Change the Song" Ordinal Counter (`ConversationManager.kt`, `IntentEngine.kt`):**
+  - `ConversationManager` maintains `currentSongIndex` (defaulting to 1 when a new search starts).
+  - Supplies `"index:$currentSongIndex"` in candidates context for active session continuity.
+  - `IntentEngine.matchPlayOrdinal` reads `currentIndex` and increments: `val nextIndex = currentIndex + 1`.
+  - Consecutive commands ("change the song" -> "change the song" -> "change the song") dynamically advance indices 2 -> 3 -> 4 -> 5...
+- [x] **Instant Cached Lookups (`YouTubePlayerHelper.kt`):**
+  - Increased initial fetch and cache to 15 items so subsequent song changes play instantly with zero network roundtrip.
+- [x] **Unit Tests & On-Device Build:**
+  - Added unit test cases for generic play queries, clarification resolution, and consecutive ordinal incrementation.
+  - All unit tests passed. Installed APK on Samsung Galaxy A14 5G (`RZCW60PWC7J`).
 
 ---
 

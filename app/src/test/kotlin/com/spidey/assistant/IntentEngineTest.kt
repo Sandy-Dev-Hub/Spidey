@@ -523,4 +523,74 @@ class IntentEngineTest {
             assertTrue("Phrase '$phrase' should produce StopAction, got: $action", action is StopAction)
         }
     }
+
+    @Test
+    fun testGenericPlayRequestsRouteToSearchSong() {
+        val genericPhrases = listOf(
+            "play",
+            "play song",
+            "play a song",
+            "play the song",
+            "play some song",
+            "play music",
+            "play some music",
+            "play songs"
+        )
+        for (phrase in genericPhrases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce an action", action)
+            assertTrue("Phrase '$phrase' should produce SearchYouTubeAction, got: $action", action is SearchYouTubeAction)
+            val ytAction = action as SearchYouTubeAction
+            assertEquals("song", ytAction.query)
+            assertTrue(ytAction.isPlayDirectly)
+        }
+    }
+
+    @Test
+    fun testMusicClarificationResolution() {
+        val candidates = listOf("music_query_choice")
+
+        // 1. User answers with direct song name
+        val directSong = intentEngine.parse("believer", candidates)
+        assertTrue(directSong is SearchYouTubeAction)
+        assertEquals("believer", (directSong as SearchYouTubeAction).query)
+        assertTrue(directSong.isPlayDirectly)
+
+        // 2. User answers with "play <song>"
+        val playSong = intentEngine.parse("play Shape of You", candidates)
+        assertTrue(playSong is SearchYouTubeAction)
+        assertEquals("shape of you", (playSong as SearchYouTubeAction).query.lowercase())
+        assertTrue(playSong.isPlayDirectly)
+
+        // 3. User cancels
+        val cancelAction = intentEngine.parse("stop", candidates)
+        assertTrue(cancelAction is StopAction)
+    }
+
+    @Test
+    fun testConsecutiveChangeSongOrdinalIncrementation() {
+        // Initial state: song playing at index 1
+        val context1 = listOf("context:youtube", "query:believer", "index:1")
+        val action1 = intentEngine.parse("change the song", context1)
+        assertTrue(action1 is PlayFirstResultAction)
+        val playAction1 = action1 as PlayFirstResultAction
+        assertEquals("believer", playAction1.query)
+        assertEquals(2, playAction1.itemIndex)
+
+        // 2nd change: index now 2 -> should increment to 3
+        val context2 = listOf("context:youtube", "query:believer", "index:2")
+        val action2 = intentEngine.parse("change the song", context2)
+        assertTrue(action2 is PlayFirstResultAction)
+        val playAction2 = action2 as PlayFirstResultAction
+        assertEquals("believer", playAction2.query)
+        assertEquals(3, playAction2.itemIndex)
+
+        // 3rd change: index now 3 -> should increment to 4
+        val context3 = listOf("context:youtube", "query:believer", "index:3")
+        val action3 = intentEngine.parse("next song", context3)
+        assertTrue(action3 is PlayFirstResultAction)
+        val playAction3 = action3 as PlayFirstResultAction
+        assertEquals("believer", playAction3.query)
+        assertEquals(4, playAction3.itemIndex)
+    }
 }

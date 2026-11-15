@@ -60,12 +60,12 @@ object YouTubePlayerHelper {
                     val id = match.groupValues[1]
                     if (seen.add(id)) {
                         distinctVideoIds.add(id)
-                        if (distinctVideoIds.size >= maxOf(maxCount, 5)) {
+                        if (distinctVideoIds.size >= maxOf(maxCount, 15)) {
                             break
                         }
                     }
                 }
-                if (distinctVideoIds.size >= maxOf(maxCount, 5)) {
+                if (distinctVideoIds.size >= maxOf(maxCount, 15)) {
                     break
                 }
                 line = reader.readLine()

@@ -33,6 +33,18 @@ class SearchYouTubeHandler(
     }
 ) : ActionHandler<SearchYouTubeAction> {
 
+    companion object {
+        val GENERIC_MUSIC_QUERIES = setOf(
+            "song", "a song", "the song", "some song", "songs", "some songs",
+            "music", "a music", "the music", "some music",
+            "track", "a track", "the track", "some track", "tracks",
+            "video", "a video", "the video", "some video", "videos",
+            "movie", "a movie", "the movie",
+            "trailer", "a trailer", "the trailer",
+            "something", "anything"
+        )
+    }
+
     override val actionType: Class<SearchYouTubeAction> = SearchYouTubeAction::class.java
 
     override suspend fun handle(action: SearchYouTubeAction): ActionResult {
@@ -41,10 +53,10 @@ class SearchYouTubeHandler(
         }
 
         val cleanQuery = action.query.trim()
-        if (cleanQuery.isBlank()) {
-            return ActionResult.Failure(
-                spokenMessage = "What would you like me to search for on YouTube?",
-                reason = "Empty search query"
+        if (cleanQuery.isBlank() || cleanQuery.lowercase() in GENERIC_MUSIC_QUERIES) {
+            return ActionResult.NeedsClarification(
+                question = "What song would you like me to play, bro?",
+                candidates = listOf("music_query_choice")
             )
         }
 

@@ -43,6 +43,7 @@ class IntentEngine {
 
         val isYouTubeContext = candidatesContext.contains("context:youtube")
         val previousSearchQuery = candidatesContext.firstOrNull { it.startsWith("query:") }?.removePrefix("query:")
+        val currentIndex = candidatesContext.firstOrNull { it.startsWith("index:") }?.removePrefix("index:")?.toIntOrNull() ?: 1
 
         // 2. System commands
         // 2a. Stop / Cancel / Sleep commands
@@ -81,7 +82,7 @@ class IntentEngine {
 
         // 4. In-App commands (when foreground app is known and supports them)
         // 4a. Play ordinal result ("play the first one", "play the third video on the search", "play 2nd video")
-        val playOrdinalAction = matchPlayOrdinal(normalized, previousSearchQuery, isYouTubeContext)
+        val playOrdinalAction = matchPlayOrdinal(normalized, previousSearchQuery, isYouTubeContext, currentIndex)
         if (playOrdinalAction != null) {
             return playOrdinalAction
         }
@@ -196,7 +197,7 @@ class IntentEngine {
         if (candidatesContext.contains("number_choice")) {
             val session = CallSessionManager.getValidSession()
             val choices = candidatesContext.filter {
-                it != "number_choice" && !it.startsWith("context:") && !it.startsWith("query:")
+                it != "number_choice" && !it.startsWith("context:") && !it.startsWith("query:") && !it.startsWith("index:")
             }
             val chosen = resolveClarification(reply, choices) ?: reply
             return CallContactAction(
@@ -206,10 +207,32 @@ class IntentEngine {
             )
         }
 
-        // E. Ambiguous contact resolution (ONLY when actual candidate contact strings are present)
+        // E. Music query clarification ("What song would you like me to play, bro?")
+        if (candidatesContext.contains("music_query_choice")) {
+            if (isStopCommand(reply)) {
+                return StopAction()
+            }
+            var songQuery = reply
+            val playPrefixes = listOf(
+                "play song ", "play the song ", "play a song ",
+                "play ", "search for song ", "search for ", "search ",
+                "listen to ", "open "
+            )
+            for (p in playPrefixes) {
+                if (songQuery.startsWith(p)) {
+                    songQuery = songQuery.removePrefix(p).trim()
+                    break
+                }
+            }
+            if (songQuery.isBlank()) songQuery = reply
+            return SearchYouTubeAction(query = songQuery, isPlayDirectly = true)
+        }
+
+        // F. Ambiguous contact resolution (ONLY when actual candidate contact strings are present)
         val contactCandidates = candidatesContext.filter {
-            !it.startsWith("context:") && !it.startsWith("query:") &&
+            !it.startsWith("context:") && !it.startsWith("query:") && !it.startsWith("index:") &&
             it != "confirm_call" && it != "sim_choice" && it != "open_app_choice" && it != "number_choice" &&
+            it != "music_query_choice" &&
             it != "yes" && it != "no" && it != "cancel"
         }
         if (contactCandidates.isNotEmpty() && !isPlayFirstCommand(reply)) {
@@ -253,7 +276,12 @@ class IntentEngine {
         return clean in unlockPhrases
     }
 
-    private fun matchPlayOrdinal(text: String, previousSearchQuery: String?, isYouTubeContext: Boolean): PlayFirstResultAction? {
+    private fun matchPlayOrdinal(
+        text: String,
+        previousSearchQuery: String?,
+        isYouTubeContext: Boolean,
+        currentIndex: Int = 1
+    ): PlayFirstResultAction? {
         var clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
 
         // Handle "change song", "different song", "next song", "play another song", "i don't like this song change it"
@@ -266,11 +294,11 @@ class IntentEngine {
                         (clean.contains("change") || clean.contains("next") || clean.contains("another") || clean.contains("different") || clean.contains("song")))
 
         if (expressesDislikeOrChange) {
-            // Default to next result (itemIndex 2 or subsequent)
+            val nextIndex = currentIndex + 1
             return PlayFirstResultAction(
                 query = previousSearchQuery ?: "trending songs",
                 targetApp = "youtube",
-                itemIndex = 2
+                itemIndex = nextIndex
             )
         }
 
@@ -416,6 +444,18 @@ class IntentEngine {
 
     private fun matchYouTubeSearch(text: String, isYouTubeContext: Boolean = false): AssistantAction? {
         val clean = text.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+
+        // Fast handling for generic play / search music requests
+        // Routes to SearchYouTubeAction("song") which triggers conversational clarification
+        val genericPlayPhrases = setOf(
+            "play", "play song", "play a song", "play the song", "play some song",
+            "play songs", "play some songs", "play music", "play some music",
+            "play track", "play a track", "play video", "play a video", "play something",
+            "search song", "search a song", "search the song", "search music", "search video"
+        )
+        if (clean in genericPlayPhrases) {
+            return SearchYouTubeAction(query = "song", isPlayDirectly = true)
+        }
 
         // STRICT SAFETY GUARD:
         // Any phrase starting with open/launch verbs NEVER produces a search action,

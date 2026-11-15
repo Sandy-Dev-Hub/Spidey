@@ -51,6 +51,7 @@ class ConversationManager(
     private var sessionTimeoutJob: Job? = null
     private var lastOpenedApp: String? = null
     private var lastSearchQuery: String? = null
+    private var currentSongIndex: Int = 1
 
     private fun resetSessionTimeout() {
         if (followUpTimeoutMs <= 0L) return
@@ -69,6 +70,7 @@ class ConversationManager(
         isSessionActive = false
         lastOpenedApp = null
         lastSearchQuery = null
+        currentSongIndex = 1
         sessionTimeoutJob?.cancel()
         sessionTimeoutJob = null
         onStopSpeechListeningRequested()
@@ -178,6 +180,7 @@ class ConversationManager(
                 }
                 if (!lastSearchQuery.isNullOrBlank()) {
                     candidates.add("query:$lastSearchQuery")
+                    candidates.add("index:$currentSongIndex")
                 }
 
                 var action = intentEngine.parse(trimmed, candidates)
@@ -305,8 +308,13 @@ class ConversationManager(
         } else if (action is com.spidey.assistant.actions.SearchYouTubeAction) {
             lastOpenedApp = "youtube"
             lastSearchQuery = action.query
+            currentSongIndex = 1
         } else if (action is com.spidey.assistant.actions.PlayFirstResultAction) {
             lastOpenedApp = action.targetApp
+            if (!action.query.isNullOrBlank()) {
+                lastSearchQuery = action.query
+            }
+            currentSongIndex = action.itemIndex
         }
 
         _state.value = AssistantState.EXECUTING
@@ -414,6 +422,7 @@ class ConversationManager(
         emptySpeechAttempts = 0
         lastOpenedApp = null
         lastSearchQuery = null
+        currentSongIndex = 1
         _state.value = AssistantState.SLEEPING
         _errorText.value = null
         // Re-arm wake word spotter
