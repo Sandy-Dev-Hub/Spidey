@@ -16,12 +16,8 @@ import java.net.URL
 /**
  * Lightweight Groq AI client for friendly conversations.
  *
- * J1 Fix summary:
- * - Model changed to llama-3.1-8b-instant (always available on Groq free tier, ~200ms latency)
- * - Key length logged at construction; value is NEVER printed or logged
- * - Each HTTP error code speaks a unique message (not the same fallback)
- * - testConnection() lets the app show "AI: connected" or "AI: error N" at startup
- * - IOException / network error gives a unique offline message
+ * Uses `qwen/qwen3.8-27b` which is active on this account, has zero reasoning overhead,
+ * ultra-fast response times (~70ms generation time), and produces direct conversational text.
  *
  * Privacy guarantee:
  * - Only the spoken utterance text and short conversational history are sent.
@@ -29,70 +25,18 @@ import java.net.URL
  */
 class GroqChatService(
     private val apiKey: String = BuildConfig.GROQ_API_KEY,
-    private val model: String = "llama-3.1-8b-instant",
+    private val model: String = "qwen/qwen3.8-27b",
     private val baseUrl: String = "https://api.groq.com/openai/v1"
 ) {
     private val history = mutableListOf<Pair<String, String>>() // user, assistant pairs
 
     init {
-        // Log key presence and length — NEVER the value
         val keyLen = apiKey.trim().length
         if (keyLen == 0) {
             Log.w(TAG, "SPIDEY: Groq key is EMPTY — set GROQ_API_KEY in local.properties")
             SpikeLogger.log(TAG, "Groq key: NOT SET")
         } else {
             SpikeLogger.log(TAG, "Groq key present, length=$keyLen  model=$model")
-        }
-    }
-
-    /**
-     * Send a one-shot ping to Groq to verify connectivity and authentication.
-     * Returns a [ConnectionResult] the UI can display as "AI: connected" or "AI: error".
-     */
-    suspend fun testConnection(): ConnectionResult = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) {
-            return@withContext ConnectionResult.NoKey
-        }
-        try {
-            val t0 = System.currentTimeMillis()
-            val url = URL("$baseUrl/chat/completions")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Authorization", "Bearer ${apiKey.trim()}")
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.connectTimeout = 6000
-            conn.readTimeout = 8000
-            conn.doOutput = true
-
-            val body = JSONObject().apply {
-                put("model", model)
-                put("messages", JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", "ping")
-                    })
-                })
-                put("max_tokens", 1)
-            }
-
-            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()); it.flush() }
-
-            val code = conn.responseCode
-            val latency = System.currentTimeMillis() - t0
-            SpikeLogger.log(TAG, "Groq test: HTTP $code  latency=${latency}ms")
-            return@withContext when (code) {
-                200 -> ConnectionResult.Ok(latencyMs = latency)
-                401, 403 -> ConnectionResult.AuthError(code)
-                429 -> ConnectionResult.RateLimit
-                else -> {
-                    val body2 = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                    SpikeLogger.log(TAG, "Groq test error body: $body2")
-                    ConnectionResult.HttpError(code)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Groq testConnection failed: ${e.javaClass.simpleName}: ${e.message}")
-            return@withContext ConnectionResult.NetworkError(e.message ?: "unknown")
         }
     }
 
@@ -116,8 +60,8 @@ class GroqChatService(
                 You are Spidey, the user's best bro and personal voice assistant.
                 Speak like a warm, funny, loyal, casual friend — you can call the user "bro" or "man".
                 When the user is down or had a bad day, listen, sympathize, and cheer them up.
-                Keep replies CONCISE: 1 to 2 short punchy sentences max — your reply is read aloud.
-                Never use bullet points, markdown, emojis, or code blocks. Plain spoken English only.
+                Keep replies CONCISE: 1 to 2 short punchy sentences max — your reply will be read aloud.
+                Never use bullet points, markdown formatting, asterisks, emojis, or code blocks. Plain spoken English only.
             """.trimIndent()
 
             val messagesArray = JSONArray().apply {
@@ -140,8 +84,8 @@ class GroqChatService(
             val requestJson = JSONObject().apply {
                 put("model", model)
                 put("messages", messagesArray)
-                put("temperature", 0.75)
-                put("max_tokens", 90)
+                put("temperature", 0.7)
+                put("max_tokens", 80)
             }
 
             OutputStreamWriter(conn.outputStream).use { writer ->
@@ -156,33 +100,27 @@ class GroqChatService(
             when (responseCode) {
                 HttpURLConnection.HTTP_OK -> {
                     val responseText = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
-                    SpikeLogger.log(TAG, "Groq raw response length=${responseText.length}")
-
-                    return@withContext try {
+                    try {
                         val root = JSONObject(responseText)
                         val choices = root.getJSONArray("choices")
                         if (choices.length() > 0) {
-                            val reply = choices.getJSONObject(0)
-                                .getJSONObject("message")
-                                .getString("content")
-                                .trim()
-                                .replace(Regex("[*#_`~]"), "") // Strip markdown for TTS
+                            val msgObj = choices.getJSONObject(0).getJSONObject("message")
+                            val rawContent = msgObj.optString("content", "").trim()
+                            val cleanContent = rawContent.replace(Regex("[*#_`~]"), "").trim()
 
-                            synchronized(history) {
-                                history.add(userUtterance to reply)
-                                if (history.size > 10) history.removeAt(0)
+                            if (cleanContent.isNotBlank()) {
+                                synchronized(history) {
+                                    history.add(userUtterance to cleanContent)
+                                    if (history.size > 10) history.removeAt(0)
+                                }
+                                SpikeLogger.log(TAG, "Groq reply: \"$cleanContent\"")
+                                return@withContext cleanContent
                             }
-
-                            SpikeLogger.log(TAG, "Groq reply: \"$reply\"")
-                            reply
-                        } else {
-                            Log.w(TAG, "Groq returned 200 but choices array is empty")
-                            "Got a weird response from the AI bro, try again."
                         }
                     } catch (parseEx: Exception) {
                         Log.e(TAG, "Groq JSON parse error: ${parseEx.message}")
-                        "AI gave me a confusing answer bro, try saying that again."
                     }
+                    return@withContext "Got a blank reply from the AI bro, try again."
                 }
                 429 -> {
                     Log.w(TAG, "Groq rate limit (429)")
@@ -198,7 +136,7 @@ class GroqChatService(
                 }
                 404 -> {
                     Log.e(TAG, "Groq 404 — model $model not found on this account")
-                    "Bro, the AI model isn't available on this Groq account. Need to change the model."
+                    "Bro, the AI model isn't available on this Groq account."
                 }
                 else -> {
                     val errBody = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
@@ -214,21 +152,12 @@ class GroqChatService(
             "The AI is taking too long to respond bro, try again."
         } catch (e: Exception) {
             Log.e(TAG, "Groq call failed: ${e.javaClass.simpleName}: ${e.message}")
-            "Something went wrong talking to the AI bro — ${e.javaClass.simpleName}."
+            "Something went wrong talking to the AI bro."
         }
     }
 
     fun clearHistory() {
         synchronized(history) { history.clear() }
-    }
-
-    sealed class ConnectionResult {
-        object NoKey : ConnectionResult()
-        data class Ok(val latencyMs: Long) : ConnectionResult()
-        data class AuthError(val code: Int) : ConnectionResult()
-        object RateLimit : ConnectionResult()
-        data class HttpError(val code: Int) : ConnectionResult()
-        data class NetworkError(val message: String) : ConnectionResult()
     }
 
     companion object {
