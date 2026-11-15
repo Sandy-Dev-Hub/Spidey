@@ -17,6 +17,7 @@
 | Task J0 & J1: Groq AI Chat Engine & Architecture | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Task J2: Calm Active Session & Bro Persona | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Task J2 Follow-up: Music Clarification & Next Song Counter | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| Task J2 Follow-up: Total Beep Elimination & Subtle Mode | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 2 (Background Launch) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 3 (Any App By Name) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 4 (Command Routing Fix) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
@@ -49,6 +50,34 @@
 - [x] **Unit Tests & On-Device Build:**
   - Added unit test cases for generic play queries, clarification resolution, and consecutive ordinal incrementation.
   - All unit tests passed. Installed APK on Samsung Galaxy A14 5G (`RZCW60PWC7J`).
+
+---
+
+## Jarvis Upgrade: Total Beep Elimination & Subtle Music Mode
+
+**Goal:**
+1. Zero beeps anywhere in the assistant — no prompt beeps, no Android SpeechRecognizer earcon beeps.
+2. When a song or app is launched, Spidey returns to subtle listening mode (`SLEEPING`) with audio ducking released and Vosk wake word engine listening in the background.
+3. The 30-second active session is preserved so the user can say *"Hey Spidey, change the song"* or speak commands without a greeting or beep.
+4. Spidey never keeps the network speech recognizer open over music to transcribe lyrics or talk unprompted.
+
+**Completed:** 2026-11-15
+
+### Implementation Deliverables
+- [x] **Silenced SpeechRecognizer System Earcons (`SpeechRecognizerManager.kt`):**
+  - Mutes `STREAM_NOTIFICATION` and `STREAM_SYSTEM` on `AudioManager` at the instant `startListening()` is called, and restores volume on `onReadyForSpeech()` / 450ms timeout.
+  - SpeechRecognizer starts silently with zero audible earcon beep.
+- [x] **Disabled ToneGenerator (`SpeechOutput.kt`, `WakeWordService.kt`):**
+  - Removed `playPromptBeep` and set `playPromptSound = {}` so no internal tones are ever triggered.
+- [x] **Subtle Mode After Media/App Launch (`ConversationManager.kt`):**
+  - Added `returnToSleeping(keepSession = true)` for `PlayFirstResultAction`, `SearchYouTubeAction`, `OpenAppAction`, and `CallContactAction`.
+  - Releases microphone ducking so music plays at 100% volume.
+  - Hands mic back to offline `WakeWordEngine` (Vosk).
+  - Keeps active session (30s) alive without looping `SpeechRecognizer`.
+- [x] **No Repetitive Silence Loops (`ConversationManager.kt`):**
+  - On single speech timeout in follow-up mode, transitions to subtle sleeping with session kept active rather than endlessly restarting STT and beeping.
+- [x] **Build & Verification:**
+  - All 61 unit tests passed. Installed and verified on Samsung Galaxy A14 5G.
 
 ---
 

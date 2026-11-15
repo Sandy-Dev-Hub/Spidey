@@ -98,12 +98,7 @@ class SpeechOutput(
     }
 
     fun playPromptBeep(durationMs: Int = 180) {
-        try {
-            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
-            tone.startTone(ToneGenerator.TONE_PROP_BEEP2, durationMs)
-        } catch (e: Exception) {
-            Log.w("SpeechOutput", "Could not play prompt tone: ${e.message}")
-        }
+        // Disabled per Task J2 rules: No beeps under any circumstance
     }
 
     fun speak(text: String, onDone: () -> Unit) {

@@ -67,14 +67,7 @@ class ConversationManager(
     }
 
     private fun endSessionAndSleep() {
-        isSessionActive = false
-        lastOpenedApp = null
-        lastSearchQuery = null
-        currentSongIndex = 1
-        sessionTimeoutJob?.cancel()
-        sessionTimeoutJob = null
-        onStopSpeechListeningRequested()
-        returnToSleeping()
+        returnToSleeping(keepSession = false)
     }
 
     /**
@@ -144,8 +137,7 @@ class ConversationManager(
                 } else {
                     // Backward-compatible single-turn mode (followUpTimeoutMs = 0)
                     _state.value = AssistantState.LISTENING
-                    playPromptSound()
-                    kotlinx.coroutines.delay(250)
+                    kotlinx.coroutines.delay(100)
                     onStartSpeechListeningRequested()
                 }
             }
@@ -223,15 +215,8 @@ class ConversationManager(
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
                 if (isSessionActive) {
-                    // In continuous conversation window: seamlessly re-arm speech recognition
-                    scope.launch {
-                        kotlinx.coroutines.delay(250)
-                        mutex.withLock {
-                            if (isSessionActive && _state.value == AssistantState.LISTENING) {
-                                onStartSpeechListeningRequested()
-                            }
-                        }
-                    }
+                    // Turn timed out without speech; be subtle and wait on wake word while session remains active
+                    returnToSleeping(keepSession = true)
                 } else {
                     handleEmptySpeech()
                 }
@@ -250,15 +235,8 @@ class ConversationManager(
                 val isTransientOrSilence = errorCode in setOf(1, 2, 3, 5, 6, 7, 8, 11)
 
                 if (isSessionActive) {
-                    // Seamlessly re-arm speech recognition in follow-up mode
-                    scope.launch {
-                        kotlinx.coroutines.delay(350)
-                        mutex.withLock {
-                            if (isSessionActive && _state.value == AssistantState.LISTENING) {
-                                onStartSpeechListeningRequested()
-                            }
-                        }
-                    }
+                    // Turn encountered silence or error in follow-up mode; be subtle and wait on wake word while session remains active
+                    returnToSleeping(keepSession = true)
                 } else {
                     if (isTransientOrSilence && emptySpeechAttempts == 0) {
                         handleEmptySpeech()
@@ -323,6 +301,13 @@ class ConversationManager(
                 speakResponse(result.spokenMessage) {
                     if (action is StopAction) {
                         endSessionAndSleep()
+                    } else if (action is com.spidey.assistant.actions.PlayFirstResultAction ||
+                        action is com.spidey.assistant.actions.SearchYouTubeAction ||
+                        action is com.spidey.assistant.actions.OpenAppAction ||
+                        action is com.spidey.assistant.actions.CallContactAction
+                    ) {
+                        // Media playing or app launched: be subtle, return to sleeping while keeping session active
+                        returnToSleeping(keepSession = isSessionActive)
                     } else if (isSessionActive) {
                         enterFollowUpListening()
                     } else {
@@ -417,14 +402,20 @@ class ConversationManager(
         }
     }
 
-    private fun returnToSleeping() {
+    private fun returnToSleeping(keepSession: Boolean = false) {
         activeClarificationCandidates = emptyList()
         emptySpeechAttempts = 0
-        lastOpenedApp = null
-        lastSearchQuery = null
-        currentSongIndex = 1
+        if (!keepSession) {
+            isSessionActive = false
+            lastOpenedApp = null
+            lastSearchQuery = null
+            currentSongIndex = 1
+            sessionTimeoutJob?.cancel()
+            sessionTimeoutJob = null
+        }
         _state.value = AssistantState.SLEEPING
         _errorText.value = null
+        onStopSpeechListeningRequested()
         // Re-arm wake word spotter
         onWakeWordStateRequested(true)
     }

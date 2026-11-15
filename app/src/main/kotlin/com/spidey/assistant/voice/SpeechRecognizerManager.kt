@@ -2,6 +2,7 @@ package com.spidey.assistant.voice
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -23,9 +24,36 @@ class SpeechRecognizerManager(
     private val onReadyForSpeech: () -> Unit = {}
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private var recognizer: SpeechRecognizer? = null
     private var isListening = false
     private var hasSpeechStarted = false
+    private var streamNotificationMuted = false
+    private var streamSystemMuted = false
+
+    private fun silenceBeepStreams() {
+        try {
+            audioManager?.let { am ->
+                am.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE, 0)
+                am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0)
+                streamNotificationMuted = true
+                streamSystemMuted = true
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun restoreBeepStreams() {
+        try {
+            if (streamNotificationMuted || streamSystemMuted) {
+                audioManager?.let { am ->
+                    am.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0)
+                    am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
+                }
+                streamNotificationMuted = false
+                streamSystemMuted = false
+            }
+        } catch (_: Exception) {}
+    }
 
     private val timeoutRunnable = Runnable {
         if (isListening && !hasSpeechStarted) {
@@ -61,13 +89,16 @@ class SpeechRecognizerManager(
 
                 hasSpeechStarted = false
                 isListening = true
+                silenceBeepStreams()
                 newRecognizer.startListening(intent)
+                mainHandler.postDelayed({ restoreBeepStreams() }, 450)
 
                 // Silence watchdog
                 mainHandler.removeCallbacks(timeoutRunnable)
                 mainHandler.postDelayed(timeoutRunnable, timeoutMs)
                 Log.d(TAG, "SpeechRecognizer started listening (timeout=${timeoutMs}ms)")
             } catch (e: Exception) {
+                restoreBeepStreams()
                 Log.e(TAG, "Failed to start speech recognizer: ${e.message}", e)
                 isListening = false
                 onError(-1, e.message ?: "Failed to start SpeechRecognizer")
@@ -77,6 +108,7 @@ class SpeechRecognizerManager(
 
     fun stopListening() {
         mainHandler.post {
+            restoreBeepStreams()
             mainHandler.removeCallbacks(timeoutRunnable)
             if (isListening) {
                 isListening = false
@@ -91,6 +123,7 @@ class SpeechRecognizerManager(
 
     fun cancel() {
         mainHandler.post {
+            restoreBeepStreams()
             mainHandler.removeCallbacks(timeoutRunnable)
             isListening = false
             hasSpeechStarted = false
@@ -104,6 +137,7 @@ class SpeechRecognizerManager(
 
     fun destroy() {
         mainHandler.post {
+            restoreBeepStreams()
             mainHandler.removeCallbacks(timeoutRunnable)
             isListening = false
             try {
@@ -117,6 +151,7 @@ class SpeechRecognizerManager(
 
     private fun createListener() = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
+            restoreBeepStreams()
             Log.d(TAG, "SpeechRecognizer ready for speech")
             onReadyForSpeech()
         }
@@ -136,6 +171,7 @@ class SpeechRecognizerManager(
         }
 
         override fun onError(error: Int) {
+            restoreBeepStreams()
             mainHandler.removeCallbacks(timeoutRunnable)
             isListening = false
             val errorMsg = mapErrorCode(error)
