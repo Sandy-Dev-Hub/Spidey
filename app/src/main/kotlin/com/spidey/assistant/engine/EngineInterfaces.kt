@@ -31,6 +31,15 @@ interface TtsEngine {
     /** Speak [text]; call [onDone] when audio finishes (or immediately on error). */
     fun speak(text: String, onDone: () -> Unit)
 
+    /** Speak chunk in streaming mode; queue subsequent chunks. */
+    fun speakStream(chunk: String, isFirst: Boolean, isLast: Boolean, onDone: (() -> Unit)? = null) {
+        if (chunk.isNotBlank()) {
+            speak(chunk) { onDone?.invoke() }
+        } else {
+            onDone?.invoke()
+        }
+    }
+
     /** Stop speaking immediately. */
     fun stop()
 
@@ -51,6 +60,16 @@ interface BrainEngine {
      * Must be called from a coroutine (may do I/O).
      */
     suspend fun reply(utterance: String): String
+
+    /**
+     * Stream conversational reply sentence by sentence via [onChunk].
+     * Returns full concatenated reply.
+     */
+    suspend fun streamReply(utterance: String, onChunk: suspend (String) -> Unit): String {
+        val full = reply(utterance)
+        onChunk(full)
+        return full
+    }
 
     /** Clear conversation history. */
     fun clearHistory()

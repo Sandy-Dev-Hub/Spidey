@@ -88,6 +88,10 @@ class SpeechOutput(
                     }
                 })
                 isReady = true
+                try {
+                    // Task J3: Pre-warm TTS synthesis engine
+                    tts?.speak("", TextToSpeech.QUEUE_FLUSH, null, null)
+                } catch (_: Exception) {}
                 onInitComplete(true)
             } else {
                 Log.e("SpeechOutput", "TTS initialization failed with status $status")
@@ -116,6 +120,45 @@ class SpeechOutput(
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
         }
         currentTts.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+    }
+
+    fun speakStream(chunk: String, isFirst: Boolean, isLast: Boolean, onDone: (() -> Unit)? = null) {
+        val currentTts = tts
+        if (!isReady || currentTts == null) {
+            if (isLast) onDone?.invoke()
+            return
+        }
+
+        if (chunk.isBlank()) {
+            if (isLast) {
+                if (pendingCallbacks.isEmpty()) {
+                    onDone?.invoke()
+                } else {
+                    val lastId = pendingCallbacks.keys.lastOrNull()
+                    if (lastId != null && onDone != null) {
+                        val prevCb = pendingCallbacks[lastId]
+                        pendingCallbacks[lastId] = {
+                            prevCb?.invoke()
+                            onDone.invoke()
+                        }
+                    } else {
+                        onDone?.invoke()
+                    }
+                }
+            }
+            return
+        }
+
+        val utteranceId = UUID.randomUUID().toString()
+        if (isLast && onDone != null) {
+            pendingCallbacks[utteranceId] = onDone
+        }
+
+        val queueMode = if (isFirst) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+        val params = Bundle().apply {
+            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+        }
+        currentTts.speak(chunk, queueMode, params, utteranceId)
     }
 
     fun stop() {

@@ -187,6 +187,9 @@ class WakeWordService : Service() {
             intentEngine = intentEngine,
             scope = serviceScope,
             speak = { text, onDone -> speechOutput.speak(text, onDone) },
+            speakStream = { chunk, isFirst, isLast, onDone ->
+                speechOutput.speakStream(chunk, isFirst, isLast, onDone)
+            },
             playPromptSound = {}, // No beeps per Task J2
             onWakeWordStateRequested = { enable ->
                 if (enable) {

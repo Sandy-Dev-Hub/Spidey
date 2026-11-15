@@ -13,6 +13,10 @@ class LegacyTtsEngine(
         speechOutput.speak(text, onDone)
     }
 
+    override fun speakStream(chunk: String, isFirst: Boolean, isLast: Boolean, onDone: (() -> Unit)?) {
+        speechOutput.speakStream(chunk, isFirst, isLast, onDone)
+    }
+
     override fun stop() {
         speechOutput.stop()
     }

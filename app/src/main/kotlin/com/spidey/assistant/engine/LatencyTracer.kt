@@ -26,7 +26,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 object LatencyTracer {
 
-    enum class Phase { SPEECH_END, TEXT_READY, INTENT_DECIDED, ACTION_STARTED, FIRST_AUDIO }
+    enum class Phase { WAKE_DETECTED, SPEECH_END, TEXT_READY, INTENT_DECIDED, ACTION_STARTED, FIRST_AUDIO }
 
     private const val TAG = "SPIDEY"
     private val marks = mutableMapOf<Phase, Long>()
@@ -46,10 +46,13 @@ object LatencyTracer {
     fun finishRound() {
         if (!enabled) return
         val ordered = listOf(
+            Phase.WAKE_DETECTED to Phase.FIRST_AUDIO,
             Phase.SPEECH_END to Phase.TEXT_READY,
             Phase.TEXT_READY to Phase.INTENT_DECIDED,
             Phase.INTENT_DECIDED to Phase.ACTION_STARTED,
-            Phase.ACTION_STARTED to Phase.FIRST_AUDIO
+            Phase.ACTION_STARTED to Phase.FIRST_AUDIO,
+            Phase.SPEECH_END to Phase.ACTION_STARTED,
+            Phase.SPEECH_END to Phase.FIRST_AUDIO
         )
         val sb = StringBuilder("SPIDEY latency:")
         for ((from, to) in ordered) {

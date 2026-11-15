@@ -10,6 +10,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
+import com.spidey.assistant.engine.LatencyTracer
 
 /**
  * Manages Google's on-device/network [SpeechRecognizer] tailored for Indian English (en-IN).
@@ -167,6 +168,7 @@ class SpeechRecognizerManager(
         override fun onBufferReceived(buffer: ByteArray?) {}
 
         override fun onEndOfSpeech() {
+            LatencyTracer.mark(LatencyTracer.Phase.SPEECH_END)
             Log.d(TAG, "Speech ended, processing audio")
         }
 

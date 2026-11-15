@@ -3,6 +3,9 @@ package com.spidey.assistant.core
 import com.spidey.assistant.actions.AssistantAction
 import com.spidey.assistant.actions.StopAction
 import com.spidey.assistant.actions.UnlockAction
+import com.spidey.assistant.engine.BrainEngine
+import com.spidey.assistant.engine.LatencyTracer
+import com.spidey.assistant.engine.LegacyBrainEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,6 +25,10 @@ class ConversationManager(
     private val intentEngine: IntentEngine,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main + Job()),
     private val speak: (text: String, onDone: () -> Unit) -> Unit = { _, onDone -> onDone() },
+    private val speakStream: ((chunk: String, isFirst: Boolean, isLast: Boolean, onDone: (() -> Unit)?) -> Unit) = { chunk, _, _, onDone ->
+        speak(chunk) { onDone?.invoke() }
+    },
+    private val brainEngine: BrainEngine = LegacyBrainEngine(),
     private val playPromptSound: () -> Unit = {},
     private val onWakeWordStateRequested: (enable: Boolean) -> Unit = {},
     private val onStartSpeechListeningRequested: () -> Unit = {},
@@ -76,6 +83,7 @@ class ConversationManager(
      * it can execute immediately without waiting for a re-prompt.
      */
     fun onWakeWordDetected(inlineCommand: String? = null) {
+        LatencyTracer.mark(LatencyTracer.Phase.WAKE_DETECTED)
         scope.launch {
             mutex.withLock {
                 if (_state.value == AssistantState.PROCESSING ||
@@ -154,6 +162,7 @@ class ConversationManager(
 
                 val trimmed = text.trim()
                 _lastHeardText.value = trimmed
+                LatencyTracer.mark(LatencyTracer.Phase.TEXT_READY)
 
                 if (trimmed.isBlank()) {
                     handleEmptySpeech()
@@ -190,6 +199,7 @@ class ConversationManager(
                 }
 
                 if (action != null) {
+                    LatencyTracer.mark(LatencyTracer.Phase.INTENT_DECIDED)
                     executeAction(action)
                 } else {
                     speakResponse(
@@ -277,6 +287,32 @@ class ConversationManager(
     }
 
     private suspend fun executeAction(action: AssistantAction) {
+        if (action is com.spidey.assistant.actions.ChatAction) {
+            _state.value = AssistantState.EXECUTING
+            LatencyTracer.mark(LatencyTracer.Phase.ACTION_STARTED)
+            var isFirst = true
+            val fullReply = brainEngine.streamReply(action.message) { chunk ->
+                if (isFirst) {
+                    LatencyTracer.mark(LatencyTracer.Phase.FIRST_AUDIO)
+                    LatencyTracer.finishRound()
+                    _state.value = AssistantState.SPEAKING
+                    onWakeWordStateRequested(false)
+                }
+                _lastSpokenResponse.value = chunk
+                speakStream(chunk, isFirst, false, null)
+                isFirst = false
+            }
+            _lastSpokenResponse.value = fullReply
+            speakStream("", false, true) {
+                if (isSessionActive) {
+                    enterFollowUpListening()
+                } else {
+                    returnToSleeping()
+                }
+            }
+            return
+        }
+
         if (action is com.spidey.assistant.actions.OpenAppAction) {
             lastOpenedApp = if (action.appName.contains("youtube", ignoreCase = true) || (action.packageName?.contains("youtube", ignoreCase = true) == true)) {
                 "youtube"
@@ -296,6 +332,7 @@ class ConversationManager(
         }
 
         _state.value = AssistantState.EXECUTING
+        LatencyTracer.mark(LatencyTracer.Phase.ACTION_STARTED)
         when (val result = actionRouter.route(action)) {
             is ActionResult.Success -> {
                 speakResponse(result.spokenMessage) {
@@ -388,6 +425,8 @@ class ConversationManager(
     }
 
     private fun speakResponse(text: String, andThen: () -> Unit) {
+        LatencyTracer.mark(LatencyTracer.Phase.FIRST_AUDIO)
+        LatencyTracer.finishRound()
         _lastSpokenResponse.value = text
         _state.value = AssistantState.SPEAKING
         // Wake engine must stay disabled while speaking

@@ -12,6 +12,9 @@ class LegacyBrainEngine(
 
     override suspend fun reply(utterance: String): String = groq.chat(utterance)
 
+    override suspend fun streamReply(utterance: String, onChunk: suspend (String) -> Unit): String =
+        groq.streamChat(utterance, onChunk)
+
     override fun clearHistory() = groq.clearHistory()
 }
 
