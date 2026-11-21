@@ -45,6 +45,18 @@ class SendMessageHandler(
         }
 
         if (body.isBlank()) {
+            // Open Gmail Compose immediately so user sees mail open fastly!
+            if (platform == MessagePlatform.EMAIL && recipient.isNotBlank()) {
+                val email = cleanEmail(recipient)
+                val mailtoUri = Uri.parse("mailto:$email")
+                val preOpenIntent = Intent(Intent.ACTION_SENDTO, mailtoUri).apply {
+                    setPackage("com.google.android.gm")
+                    putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                BackgroundAppLauncher.launch(context, preOpenIntent)
+            }
+
             val q = if (platform == MessagePlatform.EMAIL) {
                 "What is the message content boss?"
             } else {
@@ -58,6 +70,21 @@ class SendMessageHandler(
 
         // Must confirm before sending per safety rules
         if (!action.isConfirmed) {
+            // Update Gmail Compose with the body so user sees the draft in Gmail!
+            if (platform == MessagePlatform.EMAIL && recipient.isNotBlank()) {
+                val email = cleanEmail(recipient)
+                val mailSubject = action.subject.ifBlank { "Message from Spidey" }
+                val mailtoUri = Uri.parse("mailto:$email?subject=${Uri.encode(mailSubject)}&body=${Uri.encode(body)}")
+                val previewIntent = Intent(Intent.ACTION_SENDTO, mailtoUri).apply {
+                    setPackage("com.google.android.gm")
+                    putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
+                    putExtra(Intent.EXTRA_SUBJECT, mailSubject)
+                    putExtra(Intent.EXTRA_TEXT, body)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                BackgroundAppLauncher.launch(context, previewIntent)
+            }
+
             val preview = if (platform == MessagePlatform.EMAIL) {
                 "Email to $recipient: '$body'. Can I send it boss?"
             } else {

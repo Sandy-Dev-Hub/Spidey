@@ -1099,7 +1099,9 @@ class IntentEngine {
         var candidateAppName: String? = null
 
         val nonAppPrefixes = listOf(
-            "search bar", "search", "find", "look for", "listen to", "call"
+            "search bar", "search", "find", "look for", "listen to", "call",
+            "mail and write", "mail and send", "email and write", "email and send",
+            "gmail and write", "gmail and send", "mail to write", "email to write"
         )
 
         // 1. Starts with an explicit open trigger
@@ -1358,6 +1360,11 @@ class IntentEngine {
             "send mail", "send a mail",
             "compose email", "compose an email", "compose a mail",
             "write email", "write an email", "write a mail",
+            "open mail and write email", "open mail and write an email", "open mail and write a email",
+            "open mail and send email", "open mail and send an email", "open mail and send a email",
+            "open email and write email", "open email and write an email", "open email and write a email",
+            "open email and send email", "open email and send an email", "open email and send a email",
+            "open gmail and write email", "open gmail and write an email", "open gmail and write a email",
             "new email", "create email", "email"
         )
         if (bareEmailTriggers.contains(clean)) {
@@ -1369,9 +1376,18 @@ class IntentEngine {
         }
 
         val emailPrefixes = listOf(
-            "send an email to ", "send a email to ", "send email to ",
-            "send a mail to ", "send mail to ", "compose email to ",
-            "compose an email to ", "write an email to ", "write email to ",
+            "open mail and write an email to ", "open mail and write a email to ", "open mail and write email to ",
+            "open mail and send an email to ", "open mail and send a email to ", "open mail and send email to ",
+            "open mail and email to ", "open mail to write an email to ", "open mail to write a email to ",
+            "open mail to write email to ", "open mail to send an email to ", "open mail to send email to ",
+            "open mail to email to ", "open mail write an email to ", "open mail write a email to ", "open mail write email to ",
+            "open email and write an email to ", "open email and write a email to ", "open email and write email to ",
+            "open email and send an email to ", "open email and send a email to ", "open email and send email to ",
+            "open gmail and write an email to ", "open gmail and write a email to ", "open gmail and write email to ",
+            "open gmail and send an email to ", "open gmail and send email to ",
+            "write an email to ", "write a email to ", "write email to ", "write a mail to ", "write mail to ",
+            "compose an email to ", "compose a email to ", "compose email to ", "compose a mail to ", "compose mail to ",
+            "send an email to ", "send a email to ", "send email to ", "send a mail to ", "send mail to ",
             "email to ", "email "
         )
         val matchedEmail = emailPrefixes.firstOrNull { clean.startsWith(it) }

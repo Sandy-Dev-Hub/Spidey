@@ -51,6 +51,7 @@ data class OpenAppAction(
     val app: AllowedApp?
         get() = AllowedApp.entries.firstOrNull {
             it.displayName.equals(appName, ignoreCase = true) ||
+            it.aliases.any { alias -> alias.equals(appName, ignoreCase = true) } ||
             (packageName != null && it.packageName == packageName)
         }
 

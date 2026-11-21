@@ -1004,5 +1004,18 @@ class IntentEngineTest {
             listOf("confirm_message", "recipient:vikki@gmail.com", "body:please review the code tomorrow", "platform:EMAIL")
         ) as com.spidey.assistant.actions.SendMessageAction
         assertEquals(true, confirmed2.isConfirmed)
+
+        // 5. Compound triggers: "open mail and write a email to ...", "write a email to ..."
+        val compound1 = intentEngine.parse("open mail and write a email to vikki@gmail.com") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikki@gmail.com", compound1.recipient)
+        assertEquals("", compound1.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.EMAIL, compound1.platform)
+
+        val compound2 = intentEngine.parse("write a email to vikki@gmail.com") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikki@gmail.com", compound2.recipient)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.EMAIL, compound2.platform)
+
+        val openMail = intentEngine.parse("open mail") as com.spidey.assistant.actions.OpenAppAction
+        assertEquals(com.spidey.assistant.actions.AllowedApp.GMAIL, openMail.app)
     }
 }
