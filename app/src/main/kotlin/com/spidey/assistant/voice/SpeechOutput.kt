@@ -67,6 +67,14 @@ class SpeechOutput(
         }
     }
 
+    private fun sanitizeForSpeech(text: String): String {
+        return text
+            .replace(Regex(",\\s*(boss|bro|friend)", RegexOption.IGNORE_CASE), " $1")
+            .replace(Regex("\\b(boss|bro|friend),", RegexOption.IGNORE_CASE), "$1")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
     fun playPromptBeep(durationMs: Int = 180) {
         // Disabled per Task J2 rules: No beeps under any circumstance
     }
@@ -87,7 +95,8 @@ class SpeechOutput(
         val params = Bundle().apply {
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
         }
-        currentTts.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+        val cleaned = sanitizeForSpeech(text)
+        currentTts.speak(cleaned, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
 
     fun speakStream(chunk: String, isFirst: Boolean, isLast: Boolean, onDone: (() -> Unit)? = null) {
@@ -101,7 +110,8 @@ class SpeechOutput(
             applyVoiceProfile(com.spidey.assistant.engine.FeatureFlags.selectedVoice)
         }
 
-        if (chunk.isBlank()) {
+        val cleaned = sanitizeForSpeech(chunk)
+        if (cleaned.isBlank()) {
             if (isLast) {
                 if (pendingCallbacks.isEmpty()) {
                     onDone?.invoke()
@@ -130,7 +140,7 @@ class SpeechOutput(
         val params = Bundle().apply {
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
         }
-        currentTts.speak(chunk, queueMode, params, utteranceId)
+        currentTts.speak(cleaned, queueMode, params, utteranceId)
     }
 
     fun applyVoiceProfile(profileName: String) {
@@ -138,13 +148,13 @@ class SpeechOutput(
         when (profileName) {
             com.spidey.assistant.engine.FeatureFlags.VOICE_JARVIS_BRITISH -> {
                 engine.language = Locale.UK
-                engine.setPitch(0.92f)
+                engine.setPitch(0.80f)
                 engine.setSpeechRate(1.02f)
                 selectBestVoice(listOf("en-gb-x-rjs-local", "en-gb-x-rjs-network", "en-gb-x-rjs", "en-gb"))
             }
             com.spidey.assistant.engine.FeatureFlags.VOICE_JARVIS_DEEP -> {
                 engine.language = Locale.UK
-                engine.setPitch(0.85f)
+                engine.setPitch(0.74f)
                 engine.setSpeechRate(0.98f)
                 selectBestVoice(listOf("en-gb-x-gbd-local", "en-gb-x-gbd-network", "en-gb-x-gbd", "en-gb"))
             }
@@ -162,7 +172,7 @@ class SpeechOutput(
             }
             else -> {
                 engine.language = Locale.UK
-                engine.setPitch(0.92f)
+                engine.setPitch(0.80f)
                 engine.setSpeechRate(1.02f)
                 selectBestVoice(listOf("en-gb-x-rjs-local", "en-gb-x-rjs-network", "en-gb-x-rjs", "en-gb"))
             }

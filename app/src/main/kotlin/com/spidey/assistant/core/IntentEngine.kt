@@ -5,12 +5,15 @@ import com.spidey.assistant.actions.AssistantAction
 import com.spidey.assistant.actions.CallContactAction
 import com.spidey.assistant.actions.FindContactAction
 import com.spidey.assistant.actions.GreetingAction
+import com.spidey.assistant.actions.InAppUnsupportedAction
 import com.spidey.assistant.actions.OpenAppAction
 import com.spidey.assistant.actions.PlayFirstResultAction
+import com.spidey.assistant.actions.PlaySpotifyAction
 import com.spidey.assistant.actions.SearchYouTubeAction
 import com.spidey.assistant.actions.StopAction
 import com.spidey.assistant.actions.TimeAction
 import com.spidey.assistant.actions.UnlockAction
+import com.spidey.assistant.actions.WhatsAppCallAction
 import com.spidey.assistant.calling.CallSessionManager
 import com.spidey.assistant.safety.ConfirmationPolicy
 
@@ -19,13 +22,13 @@ import com.spidey.assistant.safety.ConfirmationPolicy
  * Converts natural speech text into a typed [AssistantAction] without external cloud or LLM dependencies.
  *
  * Deterministic Priority Order:
- * 1. Clarifications / Confirmations (active user reply to Spidey prompts)
- * 2. System Commands (stop, cancel, unlock my phone, time/date, feedback, greetings)
- * 3. Open App Commands ("open whatsapp", "go to whatsapp", "launch chrome", "switch to contacts")
- *    - ALWAYS wins over in-app search, even when YouTube is in front!
- * 4. In-App Commands (YouTube: "play the first one", "search <query>", "play <query>")
- * 5. Calling & Contact Commands ("call mom", "find john")
- * 6. Clarify / null (never fall back to typing raw transcripts into search bars)
+ * 1. System Commands (clarifications/confirmations, stop, cancel, unlock, time/date, feedback, greetings)
+ * 2. Explicit app in phrase (e.g. "play believer on spotify", "call mom on whatsapp", "search trailer on youtube")
+ * 3. Open App Commands ("open whatsapp", "play spotify", "launch chrome", "switch to contacts")
+ * 4. In-App Commands (routes ONLY to foreground context app skill: YouTube, Spotify, WhatsApp, etc. No cross-app fallbacks!)
+ * 5. Default per intent (unqualified play/search -> YouTube, unqualified call -> Phone cellular call)
+ * 6. Conversational Chat (routed to Groq via ChatAction)
+ * 7. Clarify / null (never fall back to typing raw transcripts into search bars)
  */
 class IntentEngine {
 
@@ -33,7 +36,7 @@ class IntentEngine {
         val normalized = text.trim().lowercase()
         if (normalized.isBlank()) return null
 
-        // 1. If clarifying between ambiguous options or confirming an action
+        // 1. Clarifications / Confirmations (active user reply to Spidey prompts)
         if (candidatesContext.isNotEmpty()) {
             val clarifiedAction = handleClarification(normalized, candidatesContext)
             if (clarifiedAction != null) {
@@ -41,7 +44,6 @@ class IntentEngine {
             }
         }
 
-        val isYouTubeContext = candidatesContext.contains("context:youtube")
         val previousSearchQuery = candidatesContext.firstOrNull { it.startsWith("query:") }?.removePrefix("query:")
         val currentIndex = candidatesContext.firstOrNull { it.startsWith("index:") }?.removePrefix("index:")?.toIntOrNull() ?: 1
 
@@ -73,27 +75,39 @@ class IntentEngine {
             return GreetingAction(queryText = text)
         }
 
-        // 3. Open App intent (ALWAYS WINS OVER IN-APP SEARCH)
-        // E.g. "open whatsapp", "go to whatsapp", "open contacts", "launch chrome"
+        // 3. Explicit app in phrase (Tier 2: "play believer on spotify", "call mom on whatsapp", etc.)
+        val explicitAction = matchExplicitAppInPhrase(normalized, text)
+        if (explicitAction != null) {
+            return explicitAction
+        }
+
+        // 4. Open App intent (Tier 3: ALWAYS WINS OVER GENERIC PLAY OR SEARCH)
+        // E.g. "open whatsapp", "play spotify", "launch chrome", "switch to contacts"
         val openAppAction = matchOpenApp(normalized)
         if (openAppAction != null) {
             return openAppAction
         }
 
-        // 4. In-App commands (when foreground app is known and supports them)
-        // 4a. Play ordinal result ("play the first one", "play the third video on the search", "play 2nd video")
-        val playOrdinalAction = matchPlayOrdinal(normalized, previousSearchQuery, isYouTubeContext, currentIndex)
+        // 5. In-App commands (Tier 4: routes ONLY to foreground context app skill)
+        val inAppAction = matchInAppContext(normalized, candidatesContext, previousSearchQuery, currentIndex)
+        if (inAppAction != null) {
+            return inAppAction
+        }
+
+        // 6. Default per intent (Tier 5: when no foreground app context is active)
+        // 6a. Play ordinal result ("play the first one", "play the third video on the search", "play 2nd video")
+        val playOrdinalAction = matchPlayOrdinal(normalized, previousSearchQuery, false, currentIndex)
         if (playOrdinalAction != null) {
             return playOrdinalAction
         }
 
-        // 4b. YouTube Search / Play intent
-        val ytSearchAction = matchYouTubeSearch(normalized, isYouTubeContext)
+        // 6b. YouTube Search / Play intent
+        val ytSearchAction = matchYouTubeSearch(normalized, false)
         if (ytSearchAction != null) {
             return ytSearchAction
         }
 
-        // 5. Calling & Contact intents
+        // 6c. Calling & Contact intents
         val callAction = matchCall(normalized)
         if (callAction != null) {
             return callAction
@@ -104,14 +118,213 @@ class IntentEngine {
             return contactAction
         }
 
-        // 6. Conversational / Chat:
+        // 7. Conversational / Chat:
         // When user asks conversational questions, advice, vents, or chats
         val chatAction = matchChat(normalized, text)
         if (chatAction != null) {
             return chatAction
         }
 
-        // 7. Fallback: Return null for pure gibberish / unrecognized noise
+        // 8. Fallback: Return null for pure gibberish / unrecognized noise
+        return null
+    }
+
+    private fun matchExplicitAppInPhrase(normalized: String, originalText: String): AssistantAction? {
+        val clean = normalized.replace(Regex("[^a-z0-9 +]"), " ").replace(Regex("\\s+"), " ").trim()
+
+        if (clean == "play spotify" || clean == "play on spotify") {
+            return OpenAppAction(AllowedApp.SPOTIFY)
+        }
+        if (clean == "play youtube" || clean == "play on youtube") {
+            return OpenAppAction(AllowedApp.YOUTUBE)
+        }
+
+        // 1. Spotify in phrase
+        if (clean.endsWith(" on spotify") || clean.endsWith(" in spotify") || clean.startsWith("play on spotify ") || clean.startsWith("spotify play ")) {
+            var query = when {
+                clean.endsWith(" on spotify") -> clean.removeSuffix(" on spotify").trim()
+                clean.endsWith(" in spotify") -> clean.removeSuffix(" in spotify").trim()
+                clean.startsWith("play on spotify ") -> clean.removePrefix("play on spotify ").trim()
+                clean.startsWith("spotify play ") -> clean.removePrefix("spotify play ").trim()
+                else -> clean
+            }
+            val stripVerbs = listOf(
+                "play the song ", "play song ", "play a song ", "play ",
+                "search for the song ", "search for song ", "search for ", "search ", "listen to "
+            )
+            for (verb in stripVerbs) {
+                if (query.startsWith(verb)) {
+                    query = query.removePrefix(verb).trim()
+                    break
+                }
+            }
+            val stripLeading = listOf("the song ", "song ", "the track ", "track ", "the music ", "music ")
+            for (lead in stripLeading) {
+                if (query.startsWith(lead)) {
+                    query = query.removePrefix(lead).trim()
+                    break
+                }
+            }
+            if (query.isNotBlank() && query != "spotify" && query != "play") {
+                return PlaySpotifyAction(query = query, isPlayDirectly = true)
+            }
+        }
+
+        // 2. YouTube in phrase
+        if (clean.endsWith(" on youtube") || clean.endsWith(" in youtube") || clean.startsWith("open youtube and ") || clean.startsWith("go to youtube and ")) {
+            val isPlay = clean.contains("play")
+            var query = clean.removeSuffix(" on youtube").removeSuffix(" in youtube").trim()
+            val stripVerbs = listOf(
+                "open youtube and search for the song ", "open youtube and search for song ",
+                "open youtube and search for ", "open youtube and search ", "open youtube and play song ", "open youtube and play ",
+                "go to youtube and search for the song ", "go to youtube and search for song ",
+                "go to youtube and search for ", "go to youtube and search ", "go to youtube and play song ", "go to youtube and play ",
+                "search for the song ", "search for song ", "search song ", "search for ", "search ",
+                "play the song ", "play song ", "play a song ", "play "
+            )
+            for (verb in stripVerbs) {
+                if (query.startsWith(verb)) {
+                    query = query.removePrefix(verb).trim()
+                    break
+                }
+            }
+            val stripLeading = listOf("the song ", "song ", "the movie ", "movie ", "the video ", "video ", "the trailer ", "trailer ")
+            for (lead in stripLeading) {
+                if (query.startsWith(lead)) {
+                    query = query.removePrefix(lead).trim()
+                    break
+                }
+            }
+            if (query.isNotBlank() && query != "youtube" && query != "play") {
+                return SearchYouTubeAction(query = query, isPlayDirectly = isPlay)
+            }
+        }
+
+        // 3. WhatsApp in phrase
+        if (clean.endsWith(" on whatsapp") || clean.endsWith(" via whatsapp") || clean.endsWith(" in whatsapp") ||
+            clean.startsWith("whatsapp call ") || clean.startsWith("call on whatsapp ") || clean.startsWith("call via whatsapp ")
+        ) {
+            var target = when {
+                clean.endsWith(" on whatsapp") -> clean.removeSuffix(" on whatsapp").trim()
+                clean.endsWith(" via whatsapp") -> clean.removeSuffix(" via whatsapp").trim()
+                clean.endsWith(" in whatsapp") -> clean.removeSuffix(" in whatsapp").trim()
+                clean.startsWith("whatsapp call ") -> clean.removePrefix("whatsapp call ").trim()
+                clean.startsWith("call on whatsapp ") -> clean.removePrefix("call on whatsapp ").trim()
+                clean.startsWith("call via whatsapp ") -> clean.removePrefix("call via whatsapp ").trim()
+                else -> clean
+            }
+            val callVerbs = listOf("call ", "voice call ", "video call ", "dial ", "phone ")
+            for (verb in callVerbs) {
+                if (target.startsWith(verb)) {
+                    target = target.removePrefix(verb).trim()
+                    break
+                }
+            }
+            if (target.isNotBlank() && target != "whatsapp") {
+                return WhatsAppCallAction(contactQuery = target, isVideo = clean.contains("video"))
+            }
+        }
+
+        // 4. Phone with explicit SIM in phrase
+        val simPattern = Regex("^(.*?)\\s+(?:on|using|via|through)\\s+(sim\\s*\\d+|sim\\s*one|sim\\s*two|first\\s*sim|second\\s*sim|airtel.*|jio.*|vi.*|bsnl.*)$", RegexOption.IGNORE_CASE)
+        val simMatch = simPattern.find(clean)
+        if (simMatch != null) {
+            var callPrefix = simMatch.groupValues[1].trim()
+            val sim = simMatch.groupValues[2].trim()
+            val callVerbs = listOf("make a call to ", "place a call to ", "give a call to ", "call ", "dial ", "phone ")
+            for (verb in callVerbs) {
+                if (callPrefix.startsWith(verb)) {
+                    callPrefix = callPrefix.removePrefix(verb).trim()
+                    break
+                }
+            }
+            if (callPrefix.isNotBlank()) {
+                return CallContactAction(contactQuery = callPrefix, selectedSim = sim, isConfirmed = true)
+            }
+        }
+
+        return null
+    }
+
+    private fun matchInAppContext(
+        normalized: String,
+        candidatesContext: List<String>,
+        previousSearchQuery: String?,
+        currentIndex: Int
+    ): AssistantAction? {
+        val clean = normalized.replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+        val isSpotifyContext = candidatesContext.contains("context:spotify") || candidatesContext.contains("context:com.spotify.music")
+        val isYouTubeContext = candidatesContext.contains("context:youtube") || candidatesContext.contains("context:com.google.android.youtube")
+        val isWhatsAppContext = candidatesContext.contains("context:whatsapp") || candidatesContext.contains("context:com.whatsapp")
+        val contextApp = candidatesContext.firstOrNull { it.startsWith("context:") }?.removePrefix("context:")
+
+        val changePhrases = listOf(
+            "change song", "change the song", "change this song", "next song", "play next song", "next video",
+            "play another song", "different song", "play a different song", "another song", "skip song", "skip", "next"
+        )
+        val expressesChange = changePhrases.any { clean == it || clean.contains(it) } ||
+                ((clean.contains("dont like") || clean.contains("don t like") || clean.contains("hate")) &&
+                        (clean.contains("change") || clean.contains("next") || clean.contains("another") || clean.contains("different") || clean.contains("song")))
+
+        // 1. Spotify context
+        if (isSpotifyContext) {
+            if (expressesChange) {
+                return PlaySpotifyAction(query = "next")
+            }
+            if (clean == "play the first one" || clean == "play first" || clean == "play 1st") {
+                return PlaySpotifyAction(query = "first")
+            }
+            if (clean.startsWith("play ") || clean.startsWith("search ") || clean.startsWith("listen to ")) {
+                var q = clean.removePrefix("play ").removePrefix("search ").removePrefix("listen to ").trim()
+                if (q.startsWith("the song ") || q.startsWith("song ")) {
+                    q = q.removePrefix("the song ").removePrefix("song ").trim()
+                }
+                if (q.isNotBlank()) {
+                    return PlaySpotifyAction(query = q)
+                }
+            }
+            if (clean == "resume" || clean == "play") {
+                return PlaySpotifyAction(query = "resume")
+            }
+        }
+
+        // 2. YouTube context
+        if (isYouTubeContext) {
+            val playOrdinalAction = matchPlayOrdinal(clean, previousSearchQuery, true, currentIndex)
+            if (playOrdinalAction != null) {
+                return playOrdinalAction
+            }
+            val ytSearchAction = matchYouTubeSearch(clean, true)
+            if (ytSearchAction != null) {
+                return ytSearchAction
+            }
+        }
+
+        // 3. WhatsApp context
+        if (isWhatsAppContext) {
+            val callVerbs = listOf("call ", "voice call ", "video call ", "dial ", "phone ")
+            for (verb in callVerbs) {
+                if (clean.startsWith(verb)) {
+                    val target = clean.removePrefix(verb).trim()
+                    if (target.isNotBlank()) {
+                        return WhatsAppCallAction(contactQuery = target, isVideo = clean.contains("video"))
+                    }
+                }
+            }
+            if (expressesChange || clean.startsWith("play ") || clean.startsWith("search ")) {
+                // Strict rule: No cross-app fallback! Report honestly
+                return InAppUnsupportedAction(appName = "WhatsApp", command = "media playback")
+            }
+        }
+
+        // 4. Other foreground app context
+        if (contextApp != null && contextApp != "youtube" && contextApp != "spotify" && contextApp != "phone") {
+            if (expressesChange || clean.startsWith("play ") || clean.startsWith("play song")) {
+                val appName = contextApp.replaceFirstChar { it.uppercase() }
+                return InAppUnsupportedAction(appName = appName, command = "media playback")
+            }
+        }
+
         return null
     }
 
@@ -679,12 +892,19 @@ class IntentEngine {
         val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
         if (words.isEmpty()) return null
 
-        // Specific play-app requests (e.g. "play spotify" -> opens Spotify, not YouTube!)
-        if (clean == "play spotify" || clean == "play on spotify") {
-            return OpenAppAction(AllowedApp.SPOTIFY)
-        }
-        if (clean == "play youtube") {
-            return OpenAppAction(AllowedApp.YOUTUBE)
+        // Specific play-app requests (e.g. "play spotify", "play on spotify", "play youtube" -> opens the app, never search!)
+        if (clean.startsWith("play ") || clean.startsWith("play on ")) {
+            val appTarget = clean.removePrefix("play on ").removePrefix("play ").trim()
+            val genericWords = setOf("music", "some music", "a music", "song", "a song", "the song", "some song", "songs", "some songs", "video", "a video", "the video", "some video", "videos", "track", "a track", "the track", "tracks", "something", "anything")
+            if (appTarget !in genericWords) {
+                val matchedAllowed = AllowedApp.entries.firstOrNull {
+                    it.displayName.equals(appTarget, ignoreCase = true) ||
+                    (appTarget != "music" && it.aliases.any { alias -> alias.equals(appTarget, ignoreCase = true) })
+                }
+                if (matchedAllowed != null) {
+                    return OpenAppAction(appName = matchedAllowed.displayName, packageName = matchedAllowed.packageName)
+                }
+            }
         }
 
         val appTriggers = listOf(

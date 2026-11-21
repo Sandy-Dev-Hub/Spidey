@@ -4,12 +4,15 @@ import com.spidey.assistant.actions.AllowedApp
 import com.spidey.assistant.actions.CallContactAction
 import com.spidey.assistant.actions.FindContactAction
 import com.spidey.assistant.actions.GreetingAction
+import com.spidey.assistant.actions.InAppUnsupportedAction
 import com.spidey.assistant.actions.OpenAppAction
 import com.spidey.assistant.actions.PlayFirstResultAction
+import com.spidey.assistant.actions.PlaySpotifyAction
 import com.spidey.assistant.actions.SearchYouTubeAction
 import com.spidey.assistant.actions.StopAction
 import com.spidey.assistant.actions.TimeAction
 import com.spidey.assistant.actions.UnlockAction
+import com.spidey.assistant.actions.WhatsAppCallAction
 import com.spidey.assistant.core.IntentEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -592,5 +595,236 @@ class IntentEngineTest {
         val playAction3 = action3 as PlayFirstResultAction
         assertEquals("believer", playAction3.query)
         assertEquals(4, playAction3.itemIndex)
+    }
+
+    // =========================================================================
+    // TASK J5 TESTS: Issue #1 Fix & Context Routing across Skills (60+ phrases)
+    // =========================================================================
+
+    @Test
+    fun testIssue1PlaySpotifyOpensSpotifyNotYouTube() {
+        // Issue #1: "play spotify" must open Spotify, NOT search YouTube!
+        val action = intentEngine.parse("play spotify")
+        assertNotNull(action)
+        assertTrue("Expected OpenAppAction but got $action", action is OpenAppAction)
+        val openApp = action as OpenAppAction
+        assertEquals("Spotify", openApp.appName)
+        assertEquals("com.spotify.music", openApp.packageName)
+    }
+
+    @Test
+    fun testExplicitAppInPhraseRouting() {
+        val testCases = listOf(
+            // Spotify phrases (8)
+            "play believer on spotify" to "believer",
+            "search believer on spotify" to "believer",
+            "listen to believer on spotify" to "believer",
+            "play song starboy on spotify" to "starboy",
+            "play the song shape of you on spotify" to "shape of you",
+            "spotify play counting stars" to "counting stars",
+            "play on spotify memories" to "memories",
+            "play taylor swift in spotify" to "taylor swift"
+        )
+        for ((phrase, expectedQuery) in testCases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce action", action)
+            assertTrue("Phrase '$phrase' should produce PlaySpotifyAction, got $action", action is PlaySpotifyAction)
+            assertEquals(expectedQuery, (action as PlaySpotifyAction).query)
+        }
+
+        val ytCases = listOf(
+            // YouTube phrases (6)
+            "play believer on youtube" to ("believer" to true),
+            "search believer on youtube" to ("believer" to false),
+            "search trailer on youtube" to ("trailer" to false),
+            "play on youtube despacito" to ("despacito" to true),
+            "open youtube and play believer" to ("believer" to true),
+            "open youtube and search for trailer" to ("trailer" to false)
+        )
+        for ((phrase, expected) in ytCases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce action", action)
+            assertTrue("Phrase '$phrase' should produce SearchYouTubeAction, got $action", action is SearchYouTubeAction)
+            val yt = action as SearchYouTubeAction
+            assertEquals(expected.first, yt.query)
+            assertEquals(expected.second, yt.isPlayDirectly)
+        }
+
+        val waCases = listOf(
+            // WhatsApp phrases (6)
+            "call mom on whatsapp" to "mom",
+            "call dad via whatsapp" to "dad",
+            "whatsapp call alex" to "alex",
+            "call on whatsapp sarah" to "sarah",
+            "call vaseem on whatsapp" to "vaseem",
+            "voice call john on whatsapp" to "john"
+        )
+        for ((phrase, expectedTarget) in waCases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce action", action)
+            assertTrue("Phrase '$phrase' should produce WhatsAppCallAction, got $action", action is WhatsAppCallAction)
+            assertEquals(expectedTarget, (action as WhatsAppCallAction).contactQuery)
+        }
+
+        val phoneCases = listOf(
+            // Cellular Phone SIM phrases (5)
+            "call mom on sim 1" to ("mom" to "sim 1"),
+            "call dad on sim 2" to ("dad" to "sim 2"),
+            "call alex on airtel" to ("alex" to "airtel"),
+            "call sarah on jio" to ("sarah" to "jio"),
+            "call vaseem using sim 1" to ("vaseem" to "sim 1")
+        )
+        for ((phrase, expected) in phoneCases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce action", action)
+            assertTrue("Phrase '$phrase' should produce CallContactAction, got $action", action is CallContactAction)
+            val call = action as CallContactAction
+            assertEquals(expected.first, call.contactQuery)
+            assertEquals(expected.second, call.selectedSim)
+        }
+    }
+
+    @Test
+    fun testOpenAppVsGenericPlayRouting() {
+        val appPhrases = listOf(
+            "play spotify" to "Spotify",
+            "play on spotify" to "Spotify",
+            "play youtube" to "YouTube",
+            "open spotify" to "Spotify",
+            "launch spotify" to "Spotify",
+            "start spotify" to "Spotify",
+            "go to spotify" to "Spotify",
+            "open whatsapp" to "WhatsApp",
+            "launch whatsapp" to "WhatsApp",
+            "open camera" to "Camera",
+            "open chrome" to "Chrome",
+            "launch chrome" to "Chrome",
+            "open settings" to "Settings",
+            "open contacts" to "Contacts",
+            "open calculator" to "Calculator"
+        )
+        for ((phrase, expectedAppName) in appPhrases) {
+            val action = intentEngine.parse(phrase)
+            assertNotNull("Phrase '$phrase' should produce action", action)
+            assertTrue("Phrase '$phrase' should produce OpenAppAction, got $action", action is OpenAppAction)
+            assertEquals(expectedAppName.lowercase(), (action as OpenAppAction).appName.lowercase())
+        }
+    }
+
+    @Test
+    fun testSpotifyContextInAppRouting() {
+        val spotifyContext = listOf("context:spotify", "query:believer")
+
+        // 1. Change / Next commands inside Spotify
+        val changePhrases = listOf(
+            "change song",
+            "change the song",
+            "next song",
+            "play next song",
+            "skip",
+            "skip song",
+            "different song",
+            "another song"
+        )
+        for (phrase in changePhrases) {
+            val action = intentEngine.parse(phrase, spotifyContext)
+            assertNotNull("Phrase '$phrase' in Spotify context should produce action", action)
+            assertTrue("Expected PlaySpotifyAction for '$phrase', got $action", action is PlaySpotifyAction)
+            assertEquals("next", (action as PlaySpotifyAction).query)
+        }
+
+        // 2. Play first result inside Spotify
+        val firstAction = intentEngine.parse("play the first one", spotifyContext)
+        assertTrue(firstAction is PlaySpotifyAction)
+        assertEquals("first", (firstAction as PlaySpotifyAction).query)
+
+        // 3. Play new query inside Spotify
+        val songAction = intentEngine.parse("play starboy", spotifyContext)
+        assertTrue(songAction is PlaySpotifyAction)
+        assertEquals("starboy", (songAction as PlaySpotifyAction).query)
+
+        // 4. Resume inside Spotify
+        val resumeAction = intentEngine.parse("resume", spotifyContext)
+        assertTrue(resumeAction is PlaySpotifyAction)
+        assertEquals("resume", (resumeAction as PlaySpotifyAction).query)
+    }
+
+    @Test
+    fun testYouTubeContextInAppRouting() {
+        val ytContext = listOf("context:youtube", "query:believer", "index:1")
+
+        // 1. Change song inside YouTube increments ordinal
+        val action1 = intentEngine.parse("change song", ytContext)
+        assertTrue(action1 is PlayFirstResultAction)
+        assertEquals(2, (action1 as PlayFirstResultAction).itemIndex)
+
+        // 2. Play ordinal directly
+        val action2 = intentEngine.parse("play the third video", ytContext)
+        assertTrue(action2 is PlayFirstResultAction)
+        assertEquals(3, (action2 as PlayFirstResultAction).itemIndex)
+
+        // 3. Search inside YouTube
+        val action3 = intentEngine.parse("search for avengers trailer", ytContext)
+        assertTrue(action3 is SearchYouTubeAction)
+        assertEquals("avengers trailer", (action3 as SearchYouTubeAction).query)
+    }
+
+    @Test
+    fun testWhatsAppContextInAppRouting() {
+        val waContext = listOf("context:whatsapp")
+
+        // 1. Call commands in WhatsApp context route to WhatsAppCallAction directly
+        val callCases = listOf(
+            "call mom" to "mom",
+            "call dad" to "dad",
+            "call vaseem" to "vaseem",
+            "voice call john" to "john",
+            "dial alex" to "alex"
+        )
+        for ((phrase, expected) in callCases) {
+            val action = intentEngine.parse(phrase, waContext)
+            assertNotNull(action)
+            assertTrue("Expected WhatsAppCallAction in WhatsApp context for '$phrase', got $action", action is WhatsAppCallAction)
+            assertEquals(expected, (action as WhatsAppCallAction).contactQuery)
+        }
+
+        // 2. In-app media command in WhatsApp context: strictly NO cross-app fallback to YouTube!
+        val mediaPhrases = listOf(
+            "change song",
+            "change the song",
+            "next song",
+            "play next song",
+            "play believer",
+            "play some song"
+        )
+        for (phrase in mediaPhrases) {
+            val action = intentEngine.parse(phrase, waContext)
+            assertNotNull("Phrase '$phrase' should produce InAppUnsupportedAction in WhatsApp context", action)
+            assertTrue("Expected InAppUnsupportedAction, got $action", action is InAppUnsupportedAction)
+            val unsupp = action as InAppUnsupportedAction
+            assertEquals("WhatsApp", unsupp.appName)
+            assertEquals("media playback", unsupp.command)
+        }
+    }
+
+    @Test
+    fun testOtherAppContextNoCrossAppFallback() {
+        val chromeContext = listOf("context:chrome")
+        val settingsContext = listOf("context:settings")
+
+        val mediaPhrases = listOf(
+            "change song",
+            "next song",
+            "play believer"
+        )
+        for (phrase in mediaPhrases) {
+            val actChrome = intentEngine.parse(phrase, chromeContext)
+            assertTrue("Expected InAppUnsupportedAction in Chrome context for '$phrase', got $actChrome", actChrome is InAppUnsupportedAction)
+            assertEquals("Chrome", (actChrome as InAppUnsupportedAction).appName)
+
+            val actSettings = intentEngine.parse(phrase, settingsContext)
+            assertTrue("Expected InAppUnsupportedAction in Settings context for '$phrase', got $actSettings", actSettings is InAppUnsupportedAction)
+            assertEquals("Settings", (actSettings as InAppUnsupportedAction).appName)
+        }
     }
 }

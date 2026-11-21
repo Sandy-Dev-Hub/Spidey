@@ -36,4 +36,14 @@ class ActionRouterTest {
         val failure = result as ActionResult.Failure
         assertTrue(failure.reason.contains("No handler registered"))
     }
+
+    @Test
+    fun testInAppUnsupportedHandler() = runBlocking {
+        router.register(InAppUnsupportedHandler())
+        val result = router.route(InAppUnsupportedAction(appName = "WhatsApp", command = "media playback"))
+
+        assertTrue("Expected Failure", result is ActionResult.Failure)
+        val failure = result as ActionResult.Failure
+        assertEquals("WhatsApp does not support media playback.", failure.spokenMessage)
+    }
 }

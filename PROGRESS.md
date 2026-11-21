@@ -19,7 +19,8 @@
 | Task J2 Follow-up: Music Clarification & Next Song Counter | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Task J2 Follow-up: Total Beep Elimination & Subtle Mode | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Task J3: Speed Pass & Response Streaming | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
-| Task J4: Jarvis Voice & Spoken Persona | **IN TESTING ON DEVICE** | `phase-0-feasibility` | - |
+| Task J4: Jarvis Voice & Spoken Persona | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| Task J5: Routing Fix & Per-App Skills (Fixes #1) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 2 (Background Launch) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 3 (Any App By Name) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 4 (Command Routing Fix) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |

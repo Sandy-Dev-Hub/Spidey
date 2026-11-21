@@ -316,6 +316,10 @@ class ConversationManager(
         if (action is com.spidey.assistant.actions.OpenAppAction) {
             lastOpenedApp = if (action.appName.contains("youtube", ignoreCase = true) || (action.packageName?.contains("youtube", ignoreCase = true) == true)) {
                 "youtube"
+            } else if (action.appName.contains("spotify", ignoreCase = true) || (action.packageName?.contains("spotify", ignoreCase = true) == true)) {
+                "spotify"
+            } else if (action.appName.contains("whatsapp", ignoreCase = true) || (action.packageName?.contains("whatsapp", ignoreCase = true) == true)) {
+                "whatsapp"
             } else {
                 action.appName.lowercase()
             }
@@ -329,6 +333,14 @@ class ConversationManager(
                 lastSearchQuery = action.query
             }
             currentSongIndex = action.itemIndex
+        } else if (action is com.spidey.assistant.actions.PlaySpotifyAction) {
+            lastOpenedApp = "spotify"
+            if (action.query.isNotBlank() && action.query != "next" && action.query != "resume") {
+                lastSearchQuery = action.query
+            }
+            currentSongIndex = 1
+        } else if (action is com.spidey.assistant.actions.WhatsAppCallAction) {
+            lastOpenedApp = "whatsapp"
         }
 
         _state.value = AssistantState.EXECUTING
@@ -340,6 +352,8 @@ class ConversationManager(
                         endSessionAndSleep()
                     } else if (action is com.spidey.assistant.actions.PlayFirstResultAction ||
                         action is com.spidey.assistant.actions.SearchYouTubeAction ||
+                        action is com.spidey.assistant.actions.PlaySpotifyAction ||
+                        action is com.spidey.assistant.actions.WhatsAppCallAction ||
                         action is com.spidey.assistant.actions.OpenAppAction ||
                         action is com.spidey.assistant.actions.CallContactAction
                     ) {

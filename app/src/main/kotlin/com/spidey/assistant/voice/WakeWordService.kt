@@ -147,6 +147,22 @@ class WakeWordService : Service() {
             SpikeLogger.log("SPIDEY", "AppLauncherRepository pre-warmed installed apps cache")
         }
 
+        val spotifySkill = com.spidey.assistant.skills.SpotifySkill()
+        val youtubeSkill = com.spidey.assistant.skills.YouTubeSkill(
+            searchHandler = SearchYouTubeHandler(this@WakeWordService),
+            playFirstHandler = PlayFirstResultHandler(this@WakeWordService)
+        )
+        val callActionHandler = CallActionHandler(contactRepository, callingAccountRepository, callCoordinator, permManager)
+        val phoneSkill = com.spidey.assistant.skills.PhoneSkill(callActionHandler)
+        val whatsAppSkill = com.spidey.assistant.skills.WhatsAppCallSkill(contactRepository)
+
+        val appSkillRegistry = com.spidey.assistant.skills.AppSkillRegistry().apply {
+            register(spotifySkill)
+            register(youtubeSkill)
+            register(phoneSkill)
+            register(whatsAppSkill)
+        }
+
         actionRouter = ActionRouter().apply {
             register(GreetingHandler())
             register(StopHandler())
@@ -159,7 +175,10 @@ class WakeWordService : Service() {
             register(PlayFirstResultHandler(this@WakeWordService))
             register(SearchYouTubeHandler(this@WakeWordService))
             register(FindContactHandler(contactRepository))
-            register(CallActionHandler(contactRepository, callingAccountRepository, callCoordinator, permManager))
+            register(callActionHandler)
+            register(com.spidey.assistant.actions.PlaySpotifyHandler(this@WakeWordService, spotifySkill))
+            register(com.spidey.assistant.actions.WhatsAppCallHandler(this@WakeWordService, contactRepository, whatsAppSkill))
+            register(com.spidey.assistant.actions.InAppUnsupportedHandler())
             register(com.spidey.assistant.actions.ChatHandler())
         }
 

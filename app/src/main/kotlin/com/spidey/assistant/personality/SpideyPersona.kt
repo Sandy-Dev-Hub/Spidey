@@ -15,11 +15,11 @@ import org.json.JSONObject
 object SpideyPersona {
 
     private val defaultJarvisGreetings = listOf(
-        "At your service, boss.",
-        "Always a pleasure, boss.",
-        "Right here, boss. How can I assist?",
-        "Good to see you, boss. What's on your mind?",
-        "Ready when you are, boss."
+        "At your service boss.",
+        "Always a pleasure boss.",
+        "Right here boss. How can I assist?",
+        "Good to see you boss. What's on your mind?",
+        "Ready when you are boss."
     )
 
     private val defaultBroGreetings = listOf(
@@ -69,7 +69,7 @@ object SpideyPersona {
     @Synchronized
     fun randomGreeting(): String {
         if (greetings.isEmpty()) {
-            return if (isJarvis()) "At your service, boss." else "Hey bro, wassup?"
+            return if (isJarvis()) "At your service boss." else "Hey bro, wassup?"
         }
         if (greetings.size == 1) return greetings[0]
 
@@ -85,7 +85,7 @@ object SpideyPersona {
 
     fun appOpening(appName: String): String {
         return if (isJarvis()) {
-            "Opening $appName for you now, boss."
+            "Opening $appName for you now boss."
         } else {
             "Opening $appName for you, bro!"
         }
@@ -93,7 +93,7 @@ object SpideyPersona {
 
     fun appUnverified(appName: String): String {
         return if (isJarvis()) {
-            "I sent the request to open $appName, but could not confirm its status, boss."
+            "I sent the request to open $appName, but could not confirm its status boss."
         } else {
             "I sent the request to open $appName, but can't confirm it worked."
         }
@@ -101,7 +101,7 @@ object SpideyPersona {
 
     fun appNotFound(appName: String): String {
         return if (isJarvis()) {
-            "I couldn't locate $appName on your device, boss."
+            "I couldn't locate $appName on your device boss."
         } else {
             "Bro, I couldn't find $appName on your phone."
         }
@@ -109,7 +109,7 @@ object SpideyPersona {
 
     fun timeResponse(timeString: String): String {
         return if (isJarvis()) {
-            "The time is $timeString, boss."
+            "The time is $timeString boss."
         } else {
             "The time is $timeString, bro!"
         }
@@ -117,7 +117,7 @@ object SpideyPersona {
 
     fun dateResponse(dateString: String): String {
         return if (isJarvis()) {
-            "Today is $dateString, boss."
+            "Today is $dateString boss."
         } else {
             "Today is $dateString, bro!"
         }
@@ -125,7 +125,7 @@ object SpideyPersona {
 
     fun stopResponse(): String {
         return if (isJarvis()) {
-            "Standing by, boss."
+            "Standing by boss."
         } else {
             "Catch you later bro, going to sleep!"
         }
@@ -134,7 +134,7 @@ object SpideyPersona {
     fun playingSong(query: String, ordinal: String? = null): String {
         val target = if (!ordinal.isNullOrBlank()) "the $ordinal video" else query
         return if (isJarvis()) {
-            "Playing $target on YouTube for you now, boss."
+            "Playing $target on YouTube for you now boss."
         } else {
             "Playing $target on YouTube, enjoy bro!"
         }
