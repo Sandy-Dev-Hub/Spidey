@@ -956,4 +956,53 @@ class IntentEngineTest {
         assertEquals("hello", a4.body)
         assertEquals(com.spidey.assistant.actions.MessagePlatform.WHATSAPP, a4.platform)
     }
+
+    @Test
+    fun testBareEmailTriggersAndConversationalFlow() {
+        // 1. Bare triggers: asks for to-mail address
+        val bare1 = intentEngine.parse("send email") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("", bare1.recipient)
+        assertEquals("", bare1.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.EMAIL, bare1.platform)
+
+        val bare2 = intentEngine.parse("compose email") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("", bare2.recipient)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.EMAIL, bare2.platform)
+
+        val bare3 = intentEngine.parse("write an email") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("", bare3.recipient)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.EMAIL, bare3.platform)
+
+        // 2. Dictate recipient email address
+        val clarifiedRecipient = intentEngine.parse(
+            "vikki at gmail dot com",
+            listOf("dictate_email_recipient", "platform:EMAIL")
+        ) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikki@gmail.com", clarifiedRecipient.recipient)
+        assertEquals("", clarifiedRecipient.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.EMAIL, clarifiedRecipient.platform)
+        assertEquals(false, clarifiedRecipient.isConfirmed)
+
+        // 3. Dictate message body with "that's all"
+        val dictatedBody = intentEngine.parse(
+            "please review the code tomorrow that's all",
+            listOf("dictate_message", "recipient:vikki@gmail.com", "platform:EMAIL")
+        ) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikki@gmail.com", dictatedBody.recipient)
+        assertEquals("please review the code tomorrow", dictatedBody.body)
+        assertEquals(false, dictatedBody.isConfirmed)
+
+        // 4. Confirm sending with "send", "send it", "send the mail"
+        val confirmed1 = intentEngine.parse(
+            "send",
+            listOf("confirm_message", "recipient:vikki@gmail.com", "body:please review the code tomorrow", "platform:EMAIL")
+        ) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals(true, confirmed1.isConfirmed)
+
+        val confirmed2 = intentEngine.parse(
+            "send the mail",
+            listOf("confirm_message", "recipient:vikki@gmail.com", "body:please review the code tomorrow", "platform:EMAIL")
+        ) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals(true, confirmed2.isConfirmed)
+    }
 }

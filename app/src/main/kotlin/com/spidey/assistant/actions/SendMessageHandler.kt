@@ -31,12 +31,27 @@ class SendMessageHandler(
         }
 
         if (recipient.isBlank()) {
-            return ActionResult.Failure("Who would you like to message boss?", "Missing recipient")
+            if (platform == MessagePlatform.EMAIL) {
+                return ActionResult.NeedsClarification(
+                    question = "What is the recipient email address boss?",
+                    candidates = listOf("dictate_email_recipient", "platform:EMAIL")
+                )
+            } else {
+                return ActionResult.NeedsClarification(
+                    question = "Who would you like to message on ${platform.displayName} boss?",
+                    candidates = listOf("dictate_recipient", "platform:${platform.name}")
+                )
+            }
         }
 
         if (body.isBlank()) {
+            val q = if (platform == MessagePlatform.EMAIL) {
+                "What is the message content boss?"
+            } else {
+                "What message would you like to send to $recipient boss?"
+            }
             return ActionResult.NeedsClarification(
-                question = "What message would you like to send to $recipient boss?",
+                question = q,
                 candidates = listOf("dictate_message", "recipient:$recipient", "platform:${platform.name}")
             )
         }
@@ -44,7 +59,7 @@ class SendMessageHandler(
         // Must confirm before sending per safety rules
         if (!action.isConfirmed) {
             val preview = if (platform == MessagePlatform.EMAIL) {
-                "Email to $recipient: '$body'. Shall I send it boss?"
+                "Email to $recipient: '$body'. Can I send it boss?"
             } else {
                 "Message to $recipient on ${platform.displayName}: '$body'. Shall I send it boss?"
             }
@@ -147,6 +162,7 @@ class SendMessageHandler(
         val mailSubject = subject.ifBlank { "Message from Spidey" }
         val mailtoUri = Uri.parse("mailto:$email?subject=${Uri.encode(mailSubject)}&body=${Uri.encode(body)}")
         val emailIntent = Intent(Intent.ACTION_SENDTO, mailtoUri).apply {
+            setPackage("com.google.android.gm")
             putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
             putExtra(Intent.EXTRA_SUBJECT, mailSubject)
             putExtra(Intent.EXTRA_TEXT, body)
@@ -155,12 +171,12 @@ class SendMessageHandler(
 
         val launched = BackgroundAppLauncher.launch(context, emailIntent)
         if (!launched) {
-            return ActionResult.Failure("Could not open email app boss.", "Email launch failed")
+            return ActionResult.Failure("Could not open Gmail boss.", "Email launch failed")
         }
 
         if (SpideyAccessibilityService.isAvailable()) {
             delay(1200)
-            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 4000L) == true
+            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 4500L) == true
             return if (clicked) {
                 ActionResult.Success(spokenMessage = "Email sent to $email boss.")
             } else {
@@ -175,8 +191,14 @@ class SendMessageHandler(
         var s = raw.trim().lowercase()
         s = s.replace(" at the rate of ", "@")
             .replace(" at the rate ", "@")
+            .replace(" at the rateof ", "@")
+            .replace(" @ ", "@")
+            .replace(" @", "@")
+            .replace("@ ", "@")
             .replace(" at ", "@")
             .replace(" dot ", ".")
+            .replace(" dot", ".")
+            .replace("dot ", ".")
         if (s.contains("@")) {
             s = s.replace(" ", "")
         }

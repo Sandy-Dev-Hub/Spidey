@@ -359,6 +359,20 @@ class IntentEngine {
     }
 
     private fun handleClarification(reply: String, candidatesContext: List<String>): AssistantAction? {
+        // 0. Email recipient dictation
+        if (candidatesContext.contains("dictate_email_recipient") ||
+            (candidatesContext.contains("dictate_recipient") && candidatesContext.contains("platform:EMAIL"))
+        ) {
+            if (isStopCommand(reply)) return StopAction()
+            val cleanEmail = normalizeEmail(reply)
+            return com.spidey.assistant.actions.SendMessageAction(
+                recipient = cleanEmail,
+                body = "",
+                platform = com.spidey.assistant.actions.MessagePlatform.EMAIL,
+                isConfirmed = false
+            )
+        }
+
         // A. Confirmation or Cancellation of a pending message
         if (candidatesContext.contains("confirm_message")) {
             val recipient = candidatesContext.firstOrNull { it.startsWith("recipient:") }?.removePrefix("recipient:") ?: ""
@@ -448,7 +462,11 @@ class IntentEngine {
             }
 
             // 5. Confirm / Cancel words
-            val confirmWords = setOf("yes", "yeah", "yep", "send", "send it", "confirm", "sure", "ok", "okay", "do it", "please send", "go ahead")
+            val confirmWords = setOf(
+                "yes", "yeah", "yep", "send", "send it", "send the mail", "send mail", "send email",
+                "send this mail", "confirm", "sure", "ok", "okay", "do it", "please send", "go ahead",
+                "deliver", "deliver it", "that's all", "thats all", "that is all", "done"
+            )
             val cancelWords = setOf("no", "nope", "cancel", "stop", "don't send", "dont send", "cancel it", "discard", "abort")
 
             if (confirmWords.any { cleanReply == it || cleanReply.startsWith("$it ") }) {
@@ -495,9 +513,24 @@ class IntentEngine {
             if (isStopCommand(reply)) {
                 return StopAction()
             }
+
+            var dictatedBody = reply.trim()
+            val stopPhrases = listOf(
+                "that's all", "thats all", "that is all",
+                "that's it", "thats it", "that is it",
+                "all done", "done", "finished"
+            )
+            for (phrase in stopPhrases) {
+                val phraseRegex = Regex("(?i)[,\\s]*\\b${Regex.escape(phrase)}\\b[.\\s]*$")
+                if (phraseRegex.containsMatchIn(dictatedBody)) {
+                    dictatedBody = dictatedBody.replace(phraseRegex, "").trim()
+                    break
+                }
+            }
+
             return com.spidey.assistant.actions.SendMessageAction(
                 recipient = recipient,
-                body = reply.trim(),
+                body = dictatedBody,
                 platform = platform,
                 isConfirmed = false
             )
@@ -1320,15 +1353,39 @@ class IntentEngine {
         }
 
         // 3. Email Messaging
+        val bareEmailTriggers = setOf(
+            "send email", "send an email", "send a email",
+            "send mail", "send a mail",
+            "compose email", "compose an email", "compose a mail",
+            "write email", "write an email", "write a mail",
+            "new email", "create email", "email"
+        )
+        if (bareEmailTriggers.contains(clean)) {
+            return com.spidey.assistant.actions.SendMessageAction(
+                recipient = "",
+                body = "",
+                platform = com.spidey.assistant.actions.MessagePlatform.EMAIL
+            )
+        }
+
         val emailPrefixes = listOf(
             "send an email to ", "send a email to ", "send email to ",
-            "send a mail to ", "send mail to ", "email to ", "email "
+            "send a mail to ", "send mail to ", "compose email to ",
+            "compose an email to ", "write an email to ", "write email to ",
+            "email to ", "email "
         )
         val matchedEmail = emailPrefixes.firstOrNull { clean.startsWith(it) }
         if (matchedEmail != null) {
             var after = clean.removePrefix(matchedEmail).trim()
             if (after.startsWith("to ")) {
                 after = after.removePrefix("to ").trim()
+            }
+            if (after.isBlank()) {
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = "",
+                    body = "",
+                    platform = com.spidey.assistant.actions.MessagePlatform.EMAIL
+                )
             }
 
             var subject = ""
@@ -1517,8 +1574,14 @@ class IntentEngine {
         res = res
             .replace(" at the rate of ", "@")
             .replace(" at the rate ", "@")
+            .replace(" at the rateof ", "@")
+            .replace(" @ ", "@")
+            .replace(" @", "@")
+            .replace("@ ", "@")
             .replace(" at ", "@")
             .replace(" dot ", ".")
+            .replace(" dot", ".")
+            .replace("dot ", ".")
         if (res.contains("@")) {
             res = res.replace(" ", "")
         }
