@@ -141,6 +141,12 @@ class WakeWordService : Service() {
             } catch (_: Exception) {}
         }
 
+        val appLauncherRepository = com.spidey.assistant.apps.AppLauncherRepository(this)
+        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            appLauncherRepository.getInstalledApps()
+            SpikeLogger.log("SPIDEY", "AppLauncherRepository pre-warmed installed apps cache")
+        }
+
         actionRouter = ActionRouter().apply {
             register(GreetingHandler())
             register(StopHandler())
@@ -149,7 +155,7 @@ class WakeWordService : Service() {
                 val km = getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
                 km?.isDeviceLocked == true
             })
-            register(OpenAppHandler(this@WakeWordService))
+            register(OpenAppHandler(this@WakeWordService, appLauncherRepository = appLauncherRepository))
             register(PlayFirstResultHandler(this@WakeWordService))
             register(SearchYouTubeHandler(this@WakeWordService))
             register(FindContactHandler(contactRepository))

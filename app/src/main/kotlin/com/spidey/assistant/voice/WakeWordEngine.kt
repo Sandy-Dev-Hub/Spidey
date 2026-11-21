@@ -61,6 +61,10 @@ class WakeWordEngine(
     private var recordThread: Thread? = null
     private var audioRecord: AudioRecord? = null
 
+    private var aec: android.media.audiofx.AcousticEchoCanceler? = null
+    private var agc: android.media.audiofx.AutomaticGainControl? = null
+    private var ns: android.media.audiofx.NoiseSuppressor? = null
+
     private var detectionCount = 0
 
     private val _diagnostics = MutableStateFlow(WakeWordDiagnostics())
@@ -106,8 +110,8 @@ class WakeWordEngine(
             stopAudioThreadAndReleaseRecord()
 
             // Initialize recognizer with constrained vocabulary for 99%+ wake-word accuracy
-            // By constraining the Vosk grammar to our trigger words, the decoder will NOT wander into thousands of general dictionary words
-            val grammar = """["hey spider", "hey spidey", "spider", "spidey", "hi spider", "hi spidey", "hello spider", "hello spidey", "ok spider", "ok spidey", "[unk]"]"""
+            // By constraining the Vosk grammar to our trigger words and fast in-session commands, the decoder will NOT wander into thousands of general dictionary words
+            val grammar = """["hey spider", "hey spidey", "spider", "spidey", "hi spider", "hi spidey", "hello spider", "hello spidey", "ok spider", "ok spidey", "change the song", "change song", "next song", "stop", "[unk]"]"""
             recognizer = Recognizer(currentModel, 16000.0f, grammar)
             isListening = true
             isPaused = false
@@ -162,18 +166,26 @@ class WakeWordEngine(
 
         audioRecord = record
 
-        // Attach AcousticEchoCanceler and AutomaticGainControl if supported by device
+        // Attach AcousticEchoCanceler, AutomaticGainControl, and NoiseSuppressor if supported by device
         try {
             val audioSessionId = record.audioSessionId
+            if (android.media.audiofx.AcousticEchoCanceler.isAvailable()) {
+                aec = android.media.audiofx.AcousticEchoCanceler.create(audioSessionId)?.apply {
+                    enabled = true
+                    SpikeLogger.log("SPIDEY", "Hardware AcousticEchoCanceler enabled for speaker cancellation")
+                }
+            }
             if (android.media.audiofx.AutomaticGainControl.isAvailable()) {
-                val agc = android.media.audiofx.AutomaticGainControl.create(audioSessionId)
-                agc?.enabled = true
-                SpikeLogger.log("SPIDEY", "Hardware AutomaticGainControl enabled for far-field capture")
+                agc = android.media.audiofx.AutomaticGainControl.create(audioSessionId)?.apply {
+                    enabled = true
+                    SpikeLogger.log("SPIDEY", "Hardware AutomaticGainControl enabled for far-field capture")
+                }
             }
             if (android.media.audiofx.NoiseSuppressor.isAvailable()) {
-                val ns = android.media.audiofx.NoiseSuppressor.create(audioSessionId)
-                ns?.enabled = true
-                SpikeLogger.log("SPIDEY", "Hardware NoiseSuppressor enabled for far-field capture")
+                ns = android.media.audiofx.NoiseSuppressor.create(audioSessionId)?.apply {
+                    enabled = true
+                    SpikeLogger.log("SPIDEY", "Hardware NoiseSuppressor enabled for far-field capture")
+                }
             }
         } catch (e: Exception) {
             SpikeLogger.log("SPIDEY", "Audio effects init exception: ${e.message}")
@@ -211,11 +223,29 @@ class WakeWordEngine(
                             )
                         }
 
-                        // Apply far-field software gain boost (~4.0x / +12 dB) with soft clamp
-                        // to reliably pick up wake word from a distance
+                        // Protect against clipping when music is playing through the phone's speaker
+                        var maxAmp = 0
                         for (i in 0 until read) {
-                            val boosted = (shortBuffer[i] * 4.0f).toInt()
-                            shortBuffer[i] = boosted.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                            val abs = Math.abs(shortBuffer[i].toInt())
+                            if (abs > maxAmp) maxAmp = abs
+                        }
+
+                        // Dynamic soft gain:
+                        // - Far-field quiet room (maxAmp < 8000): boost up to 3.5x (+11 dB)
+                        // - When loud music/audio is present: scale gain so peaks never clip above 26000
+                        val targetGain = if (maxAmp < 8000) {
+                            3.5f
+                        } else if (maxAmp < 26000) {
+                            26000f / maxAmp
+                        } else {
+                            1.0f
+                        }
+
+                        if (targetGain != 1.0f) {
+                            for (i in 0 until read) {
+                                val boosted = (shortBuffer[i] * targetGain).toInt()
+                                shortBuffer[i] = boosted.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                            }
                         }
 
                         val isFinal = rec.acceptWaveForm(shortBuffer, read)
@@ -283,6 +313,13 @@ class WakeWordEngine(
                 }
             }
         }
+        // Direct in-session commands spoken while music is playing
+        if ((clean.contains("change") && clean.contains("song")) || clean.contains("next song")) {
+            return "change the song"
+        }
+        if (clean == "stop") {
+            return "stop"
+        }
         return null
     }
 
@@ -340,6 +377,16 @@ class WakeWordEngine(
         } catch (_: Exception) {}
         recordThread = null
         try {
+            aec?.release()
+            aec = null
+            agc?.release()
+            agc = null
+            ns?.release()
+            ns = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing audio effects: ${e.message}")
+        }
+        try {
             audioRecord?.stop()
             audioRecord?.release()
         } catch (e: Exception) {
@@ -351,6 +398,9 @@ class WakeWordEngine(
     fun isWakeWordMatch(raw: String): Boolean {
         val clean = raw.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9 ]"), " ")
         val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+
+        val directCommands = listOf("change the song", "change song", "next song", "stop")
+        if (directCommands.any { clean.contains(it) }) return true
 
         val wakeKeywords = setOf(
             "spider", "spidey", "spidy", "spyder", "spydar", "spida", "speeder", "speedy",

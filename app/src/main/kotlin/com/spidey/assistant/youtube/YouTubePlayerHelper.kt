@@ -47,12 +47,13 @@ object YouTubePlayerHelper {
             val url = URL(searchUrl)
             conn = (url.openConnection() as HttpURLConnection).apply {
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                connectTimeout = 4000
-                readTimeout = 4000
+                connectTimeout = 3000
+                readTimeout = 3000
             }
 
-            reader = BufferedReader(InputStreamReader(conn.inputStream))
+            reader = BufferedReader(InputStreamReader(conn.inputStream), 16384)
             var line: String? = reader.readLine()
+            val targetLimit = maxOf(maxCount, 6)
 
             while (line != null) {
                 val matches = VIDEO_ID_REGEX.findAll(line)
@@ -60,12 +61,12 @@ object YouTubePlayerHelper {
                     val id = match.groupValues[1]
                     if (seen.add(id)) {
                         distinctVideoIds.add(id)
-                        if (distinctVideoIds.size >= maxOf(maxCount, 15)) {
+                        if (distinctVideoIds.size >= targetLimit) {
                             break
                         }
                     }
                 }
-                if (distinctVideoIds.size >= maxOf(maxCount, 15)) {
+                if (distinctVideoIds.size >= targetLimit) {
                     break
                 }
                 line = reader.readLine()

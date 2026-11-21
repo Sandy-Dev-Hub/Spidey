@@ -37,8 +37,21 @@ object BackgroundAppLauncher {
             null
         }
 
-        // Route A: PendingIntent with MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+        // Route A: Direct startActivity with options (fastest, single launch)
         try {
+            if (optionsBundle != null) {
+                context.startActivity(intent, optionsBundle)
+            } else {
+                context.startActivity(intent)
+            }
+            SpikeLogger.log(TAG, "Called direct startActivity for ${intent.component?.packageName ?: intent.getPackage()}")
+            return true
+        } catch (e: Exception) {
+            SpikeLogger.log(TAG, "Direct startActivity failed (${e.message}), falling back to PendingIntent")
+        }
+
+        // Route B: PendingIntent fallback with MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+        return try {
             val pendingIntent = PendingIntent.getActivity(
                 context,
                 (System.currentTimeMillis() % 10000).toInt(),
@@ -46,22 +59,10 @@ object BackgroundAppLauncher {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             pendingIntent.send(context, 0, null, null, null, null, optionsBundle)
-            SpikeLogger.log(TAG, "Sent launch via PendingIntent with MODE_BACKGROUND_ACTIVITY_START_ALLOWED")
-        } catch (e: Exception) {
-            Log.w(TAG, "PendingIntent send failed: ${e.message}")
-        }
-
-        // Route B: Direct startActivity with options
-        return try {
-            if (optionsBundle != null) {
-                context.startActivity(intent, optionsBundle)
-            } else {
-                context.startActivity(intent)
-            }
-            SpikeLogger.log(TAG, "Called startActivity for ${intent.component?.packageName ?: intent.getPackage()}")
+            SpikeLogger.log(TAG, "Sent launch via PendingIntent fallback")
             true
         } catch (e: Exception) {
-            SpikeLogger.log(TAG, "startActivity failed: ${e.message}")
+            Log.w(TAG, "PendingIntent send failed: ${e.message}")
             false
         }
     }

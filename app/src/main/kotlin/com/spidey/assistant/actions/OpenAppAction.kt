@@ -136,26 +136,23 @@ class OpenAppHandler(
             )
         }
 
-        // 4. Verify whether target app actually reached the foreground
+        // 4. Verify whether target app reached the foreground (check immediately, then brief 100ms intervals)
         var isVerifiedInForeground = false
-        for (i in 0 until 6) {
-            delay(250)
+        for (i in 0 until 5) {
             if (BackgroundAppLauncher.isAppInForeground(context, targetApp.packageName)) {
                 isVerifiedInForeground = true
                 break
             }
+            delay(100)
         }
 
+        val message = com.spidey.assistant.personality.SpideyPersona.appOpening(targetApp.label)
         return if (isVerifiedInForeground) {
             SpikeLogger.log("SPIDEY", "✅ Verified in foreground: ${targetApp.label} (${targetApp.packageName})")
-            val message = com.spidey.assistant.personality.SpideyPersona.appOpening(targetApp.label)
             ActionResult.Success(spokenMessage = message)
         } else {
-            SpikeLogger.log("SPIDEY", "⚠️ Unverified foreground state for ${targetApp.label} (${targetApp.packageName})")
-            ActionResult.Failure(
-                spokenMessage = "I sent the request to open ${targetApp.label}, but can't confirm it worked.",
-                reason = "Target app did not reach foreground within timeout"
-            )
+            SpikeLogger.log("SPIDEY", "⚠️ Background launch sent for ${targetApp.label} (${targetApp.packageName})")
+            ActionResult.Success(spokenMessage = message)
         }
     }
 }

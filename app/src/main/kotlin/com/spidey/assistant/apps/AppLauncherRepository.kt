@@ -8,16 +8,24 @@ import com.spidey.assistant.apps.model.AppRecord
 /**
  * Discovers all installed applications that declare a launcher activity
  * (MAIN intent + CATEGORY_LAUNCHER).
+ * Uses in-memory caching for sub-millisecond retrieval on budget devices.
  */
 class AppLauncherRepository(private val context: Context) {
 
-    fun getInstalledApps(): List<AppRecord> {
+    @Volatile
+    private var cachedApps: List<AppRecord>? = null
+
+    fun getInstalledApps(forceRefresh: Boolean = false): List<AppRecord> {
+        if (!forceRefresh) {
+            cachedApps?.let { return it }
+        }
+
         val pm = context.packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val resolveInfos = pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
         val ownPackage = context.packageName
 
-        return resolveInfos
+        val apps = resolveInfos
             .filter { it.activityInfo.packageName != ownPackage }
             .map { ri ->
                 val label = ri.loadLabel(pm).toString().trim()
@@ -28,6 +36,13 @@ class AppLauncherRepository(private val context: Context) {
             }
             .distinctBy { it.packageName }
             .sortedBy { it.label.lowercase() }
+
+        cachedApps = apps
+        return apps
+    }
+
+    fun invalidateCache() {
+        cachedApps = null
     }
 }
 
