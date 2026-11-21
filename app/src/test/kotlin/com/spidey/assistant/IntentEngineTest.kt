@@ -15,6 +15,7 @@ import com.spidey.assistant.actions.UnlockAction
 import com.spidey.assistant.actions.WhatsAppCallAction
 import com.spidey.assistant.core.IntentEngine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -826,5 +827,73 @@ class IntentEngineTest {
             assertTrue("Expected InAppUnsupportedAction in Settings context for '$phrase', got $actSettings", actSettings is InAppUnsupportedAction)
             assertEquals("Settings", (actSettings as InAppUnsupportedAction).appName)
         }
+    }
+
+    @Test
+    fun testWhatsAppMessagePhrases() {
+        val action1 = intentEngine.parse("send message to Amma on whatsapp saying I will be home by 9")
+        assertTrue("Expected SendMessageAction, got $action1", action1 is com.spidey.assistant.actions.SendMessageAction)
+        val msg1 = action1 as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("amma", msg1.recipient)
+        assertEquals("i will be home by 9", msg1.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.WHATSAPP, msg1.platform)
+
+        val action2 = intentEngine.parse("message Vaseem on whatsapp hello")
+        assertTrue(action2 is com.spidey.assistant.actions.SendMessageAction)
+        val msg2 = action2 as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vaseem", msg2.recipient)
+        assertEquals("hello", msg2.body)
+
+        val action3 = intentEngine.parse("send whatsapp message to John see you soon")
+        assertTrue(action3 is com.spidey.assistant.actions.SendMessageAction)
+        val msg3 = action3 as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("john", msg3.recipient)
+        assertEquals("see you soon", msg3.body)
+    }
+
+    @Test
+    fun testEmailMessagePhrasesWithNormalization() {
+        val action = intentEngine.parse("send email to vikki at gmail dot com saying hello world")
+        assertTrue("Expected SendMessageAction, got $action", action is com.spidey.assistant.actions.SendMessageAction)
+        val msg = action as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikki@gmail.com", msg.recipient)
+        assertEquals("hello world", msg.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.EMAIL, msg.platform)
+    }
+
+    @Test
+    fun testSmsMessagePhrases() {
+        val action = intentEngine.parse("send sms to Amma saying on my way")
+        assertTrue(action is com.spidey.assistant.actions.SendMessageAction)
+        val msg = action as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("amma", msg.recipient)
+        assertEquals("on my way", msg.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.SMS, msg.platform)
+    }
+
+    @Test
+    fun testMessageClarificationConfirmationAndCancellation() {
+        val confirmContext = listOf("confirm_message", "recipient:Amma", "body:I will be there at 9", "platform:WHATSAPP")
+
+        val yesAction = intentEngine.parse("send it", confirmContext)
+        assertTrue(yesAction is com.spidey.assistant.actions.SendMessageAction)
+        assertTrue((yesAction as com.spidey.assistant.actions.SendMessageAction).isConfirmed)
+
+        val cancelAction = intentEngine.parse("cancel", confirmContext)
+        assertTrue(cancelAction is com.spidey.assistant.actions.SendMessageAction)
+        assertTrue((cancelAction as com.spidey.assistant.actions.SendMessageAction).isCancelled)
+
+        val editAction = intentEngine.parse("change 9 to 10", confirmContext)
+        assertTrue(editAction is com.spidey.assistant.actions.SendMessageAction)
+        val edited = editAction as com.spidey.assistant.actions.SendMessageAction
+        assertFalse(edited.isConfirmed)
+        assertEquals("I will be there at 10", edited.body)
+
+        val dictateContext = listOf("dictate_message", "recipient:Amma", "platform:WHATSAPP")
+        val dictateAction = intentEngine.parse("Please call me back", dictateContext)
+        assertTrue(dictateAction is com.spidey.assistant.actions.SendMessageAction)
+        val dictated = dictateAction as com.spidey.assistant.actions.SendMessageAction
+        assertFalse(dictated.isConfirmed)
+        assertEquals("please call me back", dictated.body)
     }
 }

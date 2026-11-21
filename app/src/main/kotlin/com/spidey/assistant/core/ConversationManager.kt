@@ -354,6 +354,7 @@ class ConversationManager(
                         action is com.spidey.assistant.actions.SearchYouTubeAction ||
                         action is com.spidey.assistant.actions.PlaySpotifyAction ||
                         action is com.spidey.assistant.actions.WhatsAppCallAction ||
+                        action is com.spidey.assistant.actions.SendMessageAction ||
                         action is com.spidey.assistant.actions.OpenAppAction ||
                         action is com.spidey.assistant.actions.CallContactAction
                     ) {

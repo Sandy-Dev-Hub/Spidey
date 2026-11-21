@@ -178,6 +178,7 @@ class WakeWordService : Service() {
             register(callActionHandler)
             register(com.spidey.assistant.actions.PlaySpotifyHandler(this@WakeWordService, spotifySkill))
             register(com.spidey.assistant.actions.WhatsAppCallHandler(this@WakeWordService, contactRepository, whatsAppSkill))
+            register(com.spidey.assistant.actions.SendMessageHandler(this@WakeWordService, contactRepository))
             register(com.spidey.assistant.actions.InAppUnsupportedHandler())
             register(com.spidey.assistant.actions.ChatHandler())
         }

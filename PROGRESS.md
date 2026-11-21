@@ -1,6 +1,6 @@
 # SPIDEY - Progress Tracker
 
-## Current Phase: Jarvis Upgrade - Task J3 Speed Pass & Real-Time Streaming
+## Current Phase: Jarvis Upgrade - Task J6 Messaging Agent (WhatsApp, Email, SMS)
 
 | Phase | Status | Branch | Tag |
 |---|---|---|---|
@@ -21,11 +21,43 @@
 | Task J3: Speed Pass & Response Streaming | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Task J4: Jarvis Voice & Spoken Persona | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Task J5: Routing Fix & Per-App Skills (Fixes #1) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+| Task J6: Messaging Agent (WhatsApp, Email, SMS) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 2 (Background Launch) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 3 (Any App By Name) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 4 (Command Routing Fix) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 5 (YouTube Search & Play) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
 | Fix Round: Task 6 (Supported Unlock Flow) | **VERIFIED ON DEVICE** | `phase-0-feasibility` | - |
+
+---
+
+## Jarvis Upgrade: Task J6 Messaging Agent (WhatsApp, Email, SMS) with Dictation
+
+**Goal:**
+1. Voice dictation across WhatsApp, Email, and SMS: "send a message to Amma on WhatsApp saying I will be home by 9", "send email to vikki at gmail dot com saying hello", "send SMS to Amma saying on my way".
+2. Dictated email address normalization ("vikki at gmail dot com" -> `vikki@gmail.com`).
+3. Mandatory confirm-before-send: Spidey reads back recipient and message body, asking "Send it boss?", and respects confirmations ("yes", "send", "confirm"), cancellations ("cancel", "no"), and quick edits ("change 9 to 10").
+4. Hands-free auto-tapping via `SpideyAccessibilityService` to click "Send" in WhatsApp (`com.whatsapp:id/send`) and Gmail (`com.google.android.gm:id/send`).
+
+**Completed:** 2026-11-21
+
+### Implementation Deliverables
+- [x] **`SpideyAccessibilityService` (`app/.../accessibility/SpideyAccessibilityService.kt`):**
+  - Accessibility service with config `accessibility_service_config.xml` declared in `AndroidManifest.xml`.
+  - Searches active window for Send button (`com.whatsapp:id/send`, `com.google.android.gm:id/send`, content-desc "Send") and executes `ACTION_CLICK`.
+  - Strict security blocklist (banking, payments, lock screen, and password fields are strictly ignored).
+- [x] **`SendMessageAction` & `SendMessageHandler` (`app/.../actions/`):**
+  - Resolves contacts locally from `ContactRepository` without network export.
+  - WhatsApp: Launches chat with prefilled text (`https://api.whatsapp.com/send?phone=...&text=...`), then triggers auto-tap via accessibility.
+  - Email: Launches `ACTION_SENDTO` (`mailto:`) with prefilled recipient, subject, and body, then auto-taps Send.
+  - SMS: Launches `smsto:` with prefilled body.
+- [x] **`IntentEngine` Dictation & Confirmation Parser:**
+  - Added `matchMessage` with support for WhatsApp, Email, and SMS phrases.
+  - Normalizes dictated email addresses.
+  - Handles `confirm_message` state ("yes", "no", "change message to...", "change <x> to <y>").
+  - Handles `dictate_message` state (captures free speech message body after being asked).
+- [x] **Unit Tests & On-Device Deployment:**
+  - Added unit tests in `IntentEngineTest.kt` (76/76 unit tests pass).
+  - Deployed debug APK to Samsung Galaxy A14 5G (`RZCW60PWC7J`) and verified running foreground service.
 
 ---
 

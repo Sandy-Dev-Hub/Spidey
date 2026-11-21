@@ -75,6 +75,12 @@ class IntentEngine {
             return GreetingAction(queryText = text)
         }
 
+        // 2f. Messaging intent (WhatsApp, Email, SMS with dictation)
+        val messageAction = matchMessage(normalized, text)
+        if (messageAction != null) {
+            return messageAction
+        }
+
         // 3. Explicit app in phrase (Tier 2: "play believer on spotify", "call mom on whatsapp", etc.)
         val explicitAction = matchExplicitAppInPhrase(normalized, text)
         if (explicitAction != null) {
@@ -353,7 +359,80 @@ class IntentEngine {
     }
 
     private fun handleClarification(reply: String, candidatesContext: List<String>): AssistantAction? {
-        // A. Confirmation or Cancellation of a pending call
+        // A. Confirmation or Cancellation of a pending message
+        if (candidatesContext.contains("confirm_message")) {
+            val recipient = candidatesContext.firstOrNull { it.startsWith("recipient:") }?.removePrefix("recipient:") ?: ""
+            val body = candidatesContext.firstOrNull { it.startsWith("body:") }?.removePrefix("body:") ?: ""
+            val platformStr = candidatesContext.firstOrNull { it.startsWith("platform:") }?.removePrefix("platform:") ?: "WHATSAPP"
+            val subject = candidatesContext.firstOrNull { it.startsWith("subject:") }?.removePrefix("subject:") ?: ""
+            val platform = try { com.spidey.assistant.actions.MessagePlatform.valueOf(platformStr) } catch (_: Exception) { com.spidey.assistant.actions.MessagePlatform.WHATSAPP }
+
+            val cleanReply = reply.trim().lowercase()
+            val confirmWords = setOf("yes", "yeah", "yep", "send", "send it", "confirm", "sure", "ok", "okay", "do it")
+            val cancelWords = setOf("no", "nope", "cancel", "stop", "don't send", "dont send", "cancel it", "discard")
+
+            if (confirmWords.any { cleanReply == it || cleanReply.startsWith(it) }) {
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = body,
+                    platform = platform,
+                    subject = subject,
+                    isConfirmed = true
+                )
+            }
+            if (cancelWords.any { cleanReply == it || cleanReply.startsWith(it) }) {
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = body,
+                    platform = platform,
+                    subject = subject,
+                    isCancelled = true
+                )
+            }
+            if (cleanReply.startsWith("change message to ") || cleanReply.startsWith("change to ")) {
+                val newBody = cleanReply.removePrefix("change message to ").removePrefix("change to ").trim()
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = newBody,
+                    platform = platform,
+                    subject = subject,
+                    isConfirmed = false
+                )
+            }
+            // Quick edit: "change <x> to <y>"
+            val changeRegex = Regex("^change (.*?) to (.*)$")
+            val match = changeRegex.find(cleanReply)
+            if (match != null) {
+                val target = match.groupValues[1].trim()
+                val replacement = match.groupValues[2].trim()
+                val updatedBody = body.replace(target, replacement, ignoreCase = true)
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = updatedBody,
+                    platform = platform,
+                    subject = subject,
+                    isConfirmed = false
+                )
+            }
+        }
+
+        // B. Dictation of message body
+        if (candidatesContext.contains("dictate_message")) {
+            val recipient = candidatesContext.firstOrNull { it.startsWith("recipient:") }?.removePrefix("recipient:") ?: ""
+            val platformStr = candidatesContext.firstOrNull { it.startsWith("platform:") }?.removePrefix("platform:") ?: "WHATSAPP"
+            val platform = try { com.spidey.assistant.actions.MessagePlatform.valueOf(platformStr) } catch (_: Exception) { com.spidey.assistant.actions.MessagePlatform.WHATSAPP }
+            if (isStopCommand(reply)) {
+                return StopAction()
+            }
+            return com.spidey.assistant.actions.SendMessageAction(
+                recipient = recipient,
+                body = reply.trim(),
+                platform = platform,
+                isConfirmed = false
+            )
+        }
+
+        // C. Confirmation or Cancellation of a pending call
         if (candidatesContext.contains("confirm_call") || (candidatesContext.contains("yes") && candidatesContext.contains("no"))) {
             val session = CallSessionManager.getValidSession()
             val conf = ConfirmationPolicy.evaluate(reply)
@@ -444,8 +523,9 @@ class IntentEngine {
         // F. Ambiguous contact resolution (ONLY when actual candidate contact strings are present)
         val contactCandidates = candidatesContext.filter {
             !it.startsWith("context:") && !it.startsWith("query:") && !it.startsWith("index:") &&
+            !it.startsWith("recipient:") && !it.startsWith("body:") && !it.startsWith("platform:") && !it.startsWith("subject:") &&
             it != "confirm_call" && it != "sim_choice" && it != "open_app_choice" && it != "number_choice" &&
-            it != "music_query_choice" &&
+            it != "music_query_choice" && it != "confirm_message" && it != "dictate_message" &&
             it != "yes" && it != "no" && it != "cancel"
         }
         if (contactCandidates.isNotEmpty() && !isPlayFirstCommand(reply)) {
@@ -1122,5 +1202,151 @@ class IntentEngine {
         }
 
         return null
+    }
+
+    private fun matchMessage(normalized: String, originalText: String): AssistantAction? {
+        val clean = normalized.replace(Regex("[^a-z0-9 +@.:_'-]"), " ").replace(Regex("\\s+"), " ").trim()
+
+        // 1. WhatsApp Search in Chat: "search Vaseem on whatsapp", "search Amma in whatsapp"
+        val waSearchPattern = Regex("^(?:search|find)\\s+(.+?)\\s+(?:on|in)\\s+whatsapp$", RegexOption.IGNORE_CASE)
+        val waSearchMatch = waSearchPattern.find(clean)
+        if (waSearchMatch != null) {
+            val contact = waSearchMatch.groupValues[1].trim()
+            return WhatsAppCallAction(contactQuery = contact, isVideo = false)
+        }
+
+        // 2. WhatsApp Messaging
+        val waOnPattern = Regex("^(?:send\\s+(?:a\\s+)?message\\s+to|message)\\s+(.+?)\\s+(?:on|via|in)\\s+whatsapp(?:\\s+(?:saying|that|:))?(?:\\s+(.*))?$", RegexOption.IGNORE_CASE)
+        val waOnMatch = waOnPattern.find(clean)
+        if (waOnMatch != null) {
+            val recipient = waOnMatch.groupValues[1].trim()
+            val body = waOnMatch.groupValues[2].trim()
+            if (recipient.isNotBlank() && recipient != "whatsapp") {
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = body,
+                    platform = com.spidey.assistant.actions.MessagePlatform.WHATSAPP
+                )
+            }
+        }
+
+        // B. "send whatsapp [message] to <recipient> [saying/that/: <body>]"
+        if (clean.startsWith("send whatsapp message to ") || clean.startsWith("send whatsapp to ") || clean.startsWith("whatsapp message to ")) {
+            val after = when {
+                clean.startsWith("send whatsapp message to ") -> clean.removePrefix("send whatsapp message to ")
+                clean.startsWith("send whatsapp to ") -> clean.removePrefix("send whatsapp to ")
+                else -> clean.removePrefix("whatsapp message to ")
+            }.trim()
+
+            val (recipient, body) = splitRecipientAndBody(after)
+            if (recipient.isNotBlank()) {
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = body,
+                    platform = com.spidey.assistant.actions.MessagePlatform.WHATSAPP
+                )
+            }
+        }
+
+        // 3. Email Messaging
+        if (clean.startsWith("send an email to ") || clean.startsWith("send email to ") || clean.startsWith("send a mail to ") || clean.startsWith("send mail to ") || clean.startsWith("email ")) {
+            val after = when {
+                clean.startsWith("send an email to ") -> clean.removePrefix("send an email to ")
+                clean.startsWith("send email to ") -> clean.removePrefix("send email to ")
+                clean.startsWith("send a mail to ") -> clean.removePrefix("send a mail to ")
+                clean.startsWith("send mail to ") -> clean.removePrefix("send mail to ")
+                else -> clean.removePrefix("email ")
+            }.trim()
+
+            var subject = ""
+            var remaining = after
+            if (remaining.contains(" subject ")) {
+                val parts = remaining.split(" subject ", limit = 2)
+                val rawRecipient = parts[0].trim()
+                val rest = parts[1].trim()
+                if (rest.contains(" body ")) {
+                    val sParts = rest.split(" body ", limit = 2)
+                    subject = sParts[0].trim()
+                    remaining = sParts[1].trim()
+                } else if (rest.contains(" saying ")) {
+                    val sParts = rest.split(" saying ", limit = 2)
+                    subject = sParts[0].trim()
+                    remaining = sParts[1].trim()
+                } else {
+                    subject = rest
+                    remaining = ""
+                }
+                val recipient = normalizeEmail(rawRecipient)
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = remaining,
+                    platform = com.spidey.assistant.actions.MessagePlatform.EMAIL,
+                    subject = subject
+                )
+            }
+
+            val (rawRecipient, body) = splitRecipientAndBody(remaining)
+            val recipient = normalizeEmail(rawRecipient)
+            if (recipient.isNotBlank()) {
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = body,
+                    platform = com.spidey.assistant.actions.MessagePlatform.EMAIL,
+                    subject = subject
+                )
+            }
+        }
+
+        // 4. SMS Messaging
+        if (clean.startsWith("send sms to ") || clean.startsWith("send an sms to ") || clean.startsWith("send a text message to ") || clean.startsWith("send a text to ") || clean.startsWith("send text to ") || clean.startsWith("text ")) {
+            val after = when {
+                clean.startsWith("send an sms to ") -> clean.removePrefix("send an sms to ")
+                clean.startsWith("send sms to ") -> clean.removePrefix("send sms to ")
+                clean.startsWith("send a text message to ") -> clean.removePrefix("send a text message to ")
+                clean.startsWith("send a text to ") -> clean.removePrefix("send a text to ")
+                clean.startsWith("send text to ") -> clean.removePrefix("send text to ")
+                else -> clean.removePrefix("text ")
+            }.trim()
+
+            val (recipient, body) = splitRecipientAndBody(after)
+            if (recipient.isNotBlank()) {
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = body,
+                    platform = com.spidey.assistant.actions.MessagePlatform.SMS
+                )
+            }
+        }
+
+        return null
+    }
+
+    private fun splitRecipientAndBody(text: String): Pair<String, String> {
+        val delimiters = listOf(" saying ", " that ", ": ")
+        for (delim in delimiters) {
+            if (text.contains(delim)) {
+                val parts = text.split(delim, limit = 2)
+                return Pair(parts[0].trim(), parts[1].trim())
+            }
+        }
+        val words = text.split("\\s+".toRegex())
+        return if (words.size > 1) {
+            Pair(words[0].trim(), words.drop(1).joinToString(" ").trim())
+        } else {
+            Pair(text.trim(), "")
+        }
+    }
+
+    private fun normalizeEmail(raw: String): String {
+        var res = raw.trim().lowercase()
+        if (res.contains(" at ") || res.contains(" dot ")) {
+            res = res
+                .replace(" at the rate ", "@")
+                .replace(" at the rate of ", "@")
+                .replace(" at ", "@")
+                .replace(" dot ", ".")
+                .replace(" ", "")
+        }
+        return res
     }
 }
