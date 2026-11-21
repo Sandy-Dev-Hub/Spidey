@@ -20,8 +20,8 @@ import java.util.Locale
  */
 object SpikeLogger {
 
-    private const val TAG = "SPIDEY_SPIKE"
-    private const val LOG_FILE = "spidey_spike_log.txt"
+    private const val TAG = "SPIDEY"
+    private const val LOG_FILE = "spidey_log.txt"
     private val fmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     /** In-memory ring buffer – last 500 entries. */
@@ -40,12 +40,16 @@ object SpikeLogger {
 
     fun log(tag: String, message: String) {
         val entry = "${fmt.format(Date())} [$tag] $message"
-        Log.d(TAG, entry)
+        try {
+            Log.d(TAG, entry)
+        } catch (_: Throwable) {}
         synchronized(buffer) {
             if (buffer.size >= 500) buffer.removeFirst()
             buffer.addLast(entry)
         }
-        writeToFile(entry)
+        try {
+            writeToFile(entry)
+        } catch (_: Throwable) {}
     }
 
     /** Returns a snapshot of the in-memory buffer. */

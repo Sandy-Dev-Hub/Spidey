@@ -1,0 +1,24 @@
+{
+  "greetings": [
+    "Hey bro, wassup?",
+    "Yes boss, tell me!",
+    "Haan bro, go ahead!",
+    "What's up bro?",
+    "I'm here bro, tell me!"
+  ],
+  "clarifications": [
+    "Which one bro?",
+    "Tell me which one you want."
+  ],
+  "acknowledgements": [
+    "On it bro!",
+    "Got it!",
+    "Done bro!"
+  ],
+  "signoffs": [
+    "Catch you later bro!",
+    "Alright bro, going to sleep.",
+    "See ya bro!"
+  ]
+}
+

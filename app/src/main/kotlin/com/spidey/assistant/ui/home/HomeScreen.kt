@@ -1,9 +1,13 @@
 package com.spidey.assistant.ui.home
 
 import android.Manifest
+import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
@@ -30,6 +34,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Mic
@@ -38,8 +43,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -54,6 +59,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -70,16 +76,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.spidey.assistant.core.AssistantState
+import com.spidey.assistant.voice.WakeWordDiagnostics
 import com.spidey.assistant.voice.WakeWordService
+import com.spidey.spikes.util.SpikeLogger
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun HomeScreen(
     onNavigateToSpikes: () -> Unit = {},
-    onNavigateToAliases: () -> Unit = {}
+    onNavigateToAliases: () -> Unit = {},
+    onNavigateToExclusions: () -> Unit = {},
+    onNavigateToVoiceAudition: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isServiceRunning by WakeWordService.isServiceRunning.collectAsState()
     val activeManager by WakeWordService.activeManager.collectAsState()
+    val diagnostics by WakeWordService.diagnostics.collectAsState()
 
     val assistantState = activeManager?.state?.collectAsState()?.value ?: AssistantState.SLEEPING
     val lastHeard = activeManager?.lastHeardText?.collectAsState()?.value ?: ""
@@ -109,6 +123,17 @@ fun HomeScreen(
         )
     }
 
+    val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        Settings.canDrawOverlays(context)
+    } else true
+
+    val hasUsagePermission = remember(isServiceRunning) {
+        val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+        val now = System.currentTimeMillis()
+        val stats = usm?.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 1000 * 60, now)
+        !stats.isNullOrEmpty()
+    }
+
     val micPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -131,6 +156,18 @@ fun HomeScreen(
     val notifPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted -> hasNotificationPermission = granted }
+
+    val logEntries = remember { mutableStateListOf<String>() }
+
+    fun refreshLogs() {
+        logEntries.clear()
+        val snap = SpikeLogger.snapshot().takeLast(10)
+        logEntries.addAll(snap)
+    }
+
+    LaunchedEffect(Unit) {
+        refreshLogs()
+    }
 
     val scrollState = rememberScrollState()
 
@@ -160,13 +197,27 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Voice & Contacts • Phase 2",
+                        text = "Voice Assistant • Task 2 Active",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick = onNavigateToVoiceAudition,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("🎙️ Voice & Persona", fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = onNavigateToExclusions,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Exclusions", fontSize = 12.sp)
+                    }
+
                     OutlinedButton(
                         onClick = onNavigateToAliases,
                         shape = RoundedCornerShape(12.dp)
@@ -188,6 +239,12 @@ fun HomeScreen(
             // ── Hero State Visualizer ───────────────────────────────
             AssistantStatusCard(
                 state = assistantState,
+                isServiceRunning = isServiceRunning
+            )
+
+            // ── Task Diagnostics Panel ──────────────────────────────
+            DiagnosticsPanel(
+                diagnostics = diagnostics,
                 isServiceRunning = isServiceRunning
             )
 
@@ -256,9 +313,9 @@ fun HomeScreen(
 
                     Text(
                         text = if (isServiceRunning)
-                            "• Voice trigger: say \"Hey Spider\" or \"Spider\"\n• Core commands: \"Hello\", \"Open YouTube\""
+                            "• Voice trigger: say \"Hey Spidey\", \"Spidey\", \"Hey Spider\", or \"Spider\"\n• Say \"open WhatsApp\" while YouTube or any app is active to switch directly."
                         else
-                            "Press 'Start Assistant' to start the offline foreground voice loop.",
+                            "Service is stopped. Press 'Start Assistant' to begin continuous background listening.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -297,7 +354,7 @@ fun HomeScreen(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            Icons.Default.VolumeUp,
+                            Icons.AutoMirrored.Filled.VolumeUp,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(18.dp)
@@ -355,6 +412,31 @@ fun HomeScreen(
                     )
 
                     PermissionRow(
+                        title = "Appear on top (SYSTEM_ALERT_WINDOW)",
+                        isGranted = hasOverlayPermission,
+                        onRequest = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                val intent = Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}")
+                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                context.startActivity(intent)
+                            }
+                        }
+                    )
+
+                    PermissionRow(
+                        title = "Usage Access (Foreground Verification)",
+                        isGranted = hasUsagePermission,
+                        onRequest = {
+                            val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                        }
+                    )
+
+                    PermissionRow(
                         title = "Contacts (READ_CONTACTS)",
                         isGranted = hasContactsPermission,
                         onRequest = { contactsPermLauncher.launch(Manifest.permission.READ_CONTACTS) }
@@ -368,6 +450,164 @@ fun HomeScreen(
                         )
                     }
                 }
+            }
+
+            // ── Live Recent Event Log ───────────────────────────────
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Recent Logs (tag SPIDEY)", fontWeight = FontWeight.SemiBold)
+                        OutlinedButton(
+                            onClick = { refreshLogs() },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Refresh", fontSize = 11.sp)
+                        }
+                    }
+
+                    if (logEntries.isEmpty()) {
+                        Text("(No logs yet)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        logEntries.forEach { entry ->
+                            Text(
+                                text = entry,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticsPanel(
+    diagnostics: WakeWordDiagnostics,
+    isServiceRunning: Boolean
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Speed,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Diagnostics Panel (Task 1 & 2)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            }
+
+            // Metric 1: Service alive
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Foreground Service:", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = if (isServiceRunning) "ALIVE (microphone type)" else "STOPPED",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = if (isServiceRunning) Color(0xFF00C853) else MaterialTheme.colorScheme.error
+                )
+            }
+
+            // Metric 2: Audio frames per second (FPS)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Audio Capture FPS:", style = MaterialTheme.typography.bodySmall)
+                val fpsText = if (!isServiceRunning) "0.0 FPS"
+                else if (diagnostics.isPaused) "Paused (mic released)"
+                else if (diagnostics.isSilenced) "SILENCED by OS (0.0 FPS)"
+                else "${diagnostics.audioFps} FPS (Active)"
+                Text(
+                    text = fpsText,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = if (diagnostics.isSilenced) MaterialTheme.colorScheme.error
+                    else if (diagnostics.audioFps > 0.0) Color(0xFF00C853)
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Metric 3: Total wake detections
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Detection Count:", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = "${diagnostics.detectionCount} detections",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
+            }
+
+            // Metric 4: Last wake detection time
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Last Wake Detection:", style = MaterialTheme.typography.bodySmall)
+                val timeStr = if (diagnostics.lastWakeDetectionTime > 0L) {
+                    val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.US)
+                    "${timeFmt.format(Date(diagnostics.lastWakeDetectionTime))} (\"${diagnostics.lastKeyword}\")"
+                } else "None yet"
+                Text(
+                    text = timeStr,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // Metric 5: WakeLock status
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("CPU WakeLock:", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = if (isServiceRunning) "HELD (PARTIAL_WAKE_LOCK)" else "NONE",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = if (isServiceRunning) Color(0xFF00C853) else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (diagnostics.isSilenced) {
+                Text(
+                    text = "⚠️ Microphone capture is returning zero frames. Ensure battery optimization is set to Unrestricted in Samsung Settings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
         }
     }
@@ -427,7 +667,7 @@ private fun AssistantStatusCard(
         )
         else -> Triple(
             "STANDBY (SLEEPING)",
-            "Waiting for \"Hey Spider\"...",
+            "Waiting for \"Hey Spidey\" / \"Spider\"...",
             Color(0xFF7C4DFF) // Deep Violet
         )
     }
@@ -462,7 +702,7 @@ private fun AssistantStatusCard(
                 Icon(
                     imageVector = when {
                         !isServiceRunning -> Icons.Default.MicOff
-                        state == AssistantState.SPEAKING -> Icons.Default.VolumeUp
+                        state == AssistantState.SPEAKING -> Icons.AutoMirrored.Filled.VolumeUp
                         state == AssistantState.LISTENING -> Icons.Default.Hearing
                         else -> Icons.Default.Mic
                     },

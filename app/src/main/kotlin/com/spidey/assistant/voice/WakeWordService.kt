@@ -1,31 +1,37 @@
 package com.spidey.assistant.voice
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.os.Build
-import android.os.IBinder
-import android.util.Log
-import androidx.core.app.NotificationCompat
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.os.SystemClock
+import android.util.Log
+import androidx.core.app.NotificationCompat
 import com.spidey.assistant.actions.CallActionHandler
 import com.spidey.assistant.actions.FindContactHandler
 import com.spidey.assistant.actions.GreetingHandler
 import com.spidey.assistant.actions.OpenAppHandler
+import com.spidey.assistant.actions.PlayFirstResultHandler
 import com.spidey.assistant.actions.SearchYouTubeHandler
 import com.spidey.assistant.actions.StopHandler
 import com.spidey.assistant.actions.TimeHandler
+import com.spidey.assistant.actions.UnlockHandler
 import com.spidey.assistant.calling.CallCoordinator
 import com.spidey.assistant.calling.CallingAccountRepository
 import com.spidey.assistant.contacts.ContactRepository
-
 import com.spidey.assistant.core.ActionRouter
 import com.spidey.assistant.core.AssistantState
 import com.spidey.assistant.core.ConversationManager
@@ -34,18 +40,22 @@ import com.spidey.assistant.data.SpideyDatabase
 import com.spidey.assistant.safety.PermissionManager
 import com.spidey.assistant.unlock.UnlockCoordinator
 import com.spidey.spikes.MainActivity
-import com.spidey.spikes.R
+import com.spidey.spikes.util.SpikeLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * Foreground service that keeps SPIDEY running in the background listening for "Hey Spider".
- * Provides persistent notification with status updates and an explicit Stop button.
+ * Robust background foreground service that keeps SPIDEY running continuously.
+ * Listens for "Hey Spidey", "Spidey", "Hey Spider", and "Spider" on the home screen,
+ * inside other apps, and when the screen is off/locked.
+ *
+ * Holds a partial wake lock to prevent CPU suspension when the screen turns off.
  */
 class WakeWordService : Service() {
 
@@ -58,10 +68,31 @@ class WakeWordService : Service() {
     private lateinit var wakeWordEngine: WakeWordEngine
     private lateinit var conversationManager: ConversationManager
 
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    private val userPresentReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_USER_PRESENT) {
+                SpikeLogger.log("SPIDEY", "Received ACTION_USER_PRESENT broadcast")
+                UnlockCoordinator.notifyUnlockSuccess()
+                conversationManager.onDeviceUnlocked()
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Creating WakeWordService")
+        SpikeLogger.log("SPIDEY", "Creating WakeWordService (Android 15 Foreground Service)")
         createNotificationChannel()
+        acquireWakeLock()
+
+        // Register for system unlock broadcast
+        try {
+            val filter = IntentFilter(Intent.ACTION_USER_PRESENT)
+            registerReceiver(userPresentReceiver, filter)
+        } catch (e: Exception) {
+            SpikeLogger.log("SPIDEY", "Failed to register userPresentReceiver: ${e.message}")
+        }
 
         val db = SpideyDatabase.getInstance(this)
         val permManager = PermissionManager(this)
@@ -110,14 +141,45 @@ class WakeWordService : Service() {
             } catch (_: Exception) {}
         }
 
+        val appLauncherRepository = com.spidey.assistant.apps.AppLauncherRepository(this)
+        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            appLauncherRepository.getInstalledApps()
+            SpikeLogger.log("SPIDEY", "AppLauncherRepository pre-warmed installed apps cache")
+        }
+
+        val spotifySkill = com.spidey.assistant.skills.SpotifySkill()
+        val youtubeSkill = com.spidey.assistant.skills.YouTubeSkill(
+            searchHandler = SearchYouTubeHandler(this@WakeWordService),
+            playFirstHandler = PlayFirstResultHandler(this@WakeWordService)
+        )
+        val callActionHandler = CallActionHandler(contactRepository, callingAccountRepository, callCoordinator, permManager)
+        val phoneSkill = com.spidey.assistant.skills.PhoneSkill(callActionHandler)
+        val whatsAppSkill = com.spidey.assistant.skills.WhatsAppCallSkill(contactRepository)
+
+        val appSkillRegistry = com.spidey.assistant.skills.AppSkillRegistry().apply {
+            register(spotifySkill)
+            register(youtubeSkill)
+            register(phoneSkill)
+            register(whatsAppSkill)
+        }
+
         actionRouter = ActionRouter().apply {
             register(GreetingHandler())
             register(StopHandler())
-            register(TimeHandler())
-            register(OpenAppHandler(this@WakeWordService))
+            register(TimeHandler(this@WakeWordService))
+            register(UnlockHandler {
+                val km = getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+                km?.isDeviceLocked == true
+            })
+            register(OpenAppHandler(this@WakeWordService, appLauncherRepository = appLauncherRepository))
+            register(PlayFirstResultHandler(this@WakeWordService))
             register(SearchYouTubeHandler(this@WakeWordService))
             register(FindContactHandler(contactRepository))
-            register(CallActionHandler(contactRepository, callingAccountRepository, callCoordinator, permManager))
+            register(callActionHandler)
+            register(com.spidey.assistant.actions.PlaySpotifyHandler(this@WakeWordService, spotifySkill))
+            register(com.spidey.assistant.actions.WhatsAppCallHandler(this@WakeWordService, contactRepository, whatsAppSkill))
+            register(com.spidey.assistant.actions.InAppUnsupportedHandler())
+            register(com.spidey.assistant.actions.ChatHandler())
         }
 
         intentEngine = IntentEngine()
@@ -126,23 +188,23 @@ class WakeWordService : Service() {
 
         speechRecognizerManager = SpeechRecognizerManager(
             context = this,
-            onResult = { text -> conversationManager.onSpeechRecognized(text) },
+            onResult = { text, matches -> conversationManager.onSpeechRecognized(text, matches) },
             onEmpty = { conversationManager.onSpeechEmpty() },
             onError = { code, msg -> conversationManager.onSpeechError(code, msg) }
         )
 
         wakeWordEngine = WakeWordEngine(
             context = this,
-            onWakeWordDetected = {
-                Log.d(TAG, "Wake word triggered!")
+            onWakeWordDetected = { trailingCommand ->
+                SpikeLogger.log("SPIDEY", "Wake word detected callback received! trailingCommand='$trailingCommand'")
                 requestDuckingAudioFocus()
-                conversationManager.onWakeWordDetected()
+                conversationManager.onWakeWordDetected(trailingCommand)
             },
             onModelLoaded = {
-                Log.d(TAG, "Model loaded into memory, starting wake word spotting")
+                SpikeLogger.log("SPIDEY", "Vosk model ready in memory, starting wake word loop")
                 wakeWordEngine.start()
             },
-            onError = { err -> Log.e(TAG, "WakeWordEngine error: $err") }
+            onError = { err -> SpikeLogger.log("SPIDEY", "WakeWordEngine error: $err") }
         )
 
         conversationManager = ConversationManager(
@@ -150,7 +212,10 @@ class WakeWordService : Service() {
             intentEngine = intentEngine,
             scope = serviceScope,
             speak = { text, onDone -> speechOutput.speak(text, onDone) },
-            playPromptSound = { speechOutput.playPromptBeep() },
+            speakStream = { chunk, isFirst, isLast, onDone ->
+                speechOutput.speakStream(chunk, isFirst, isLast, onDone)
+            },
+            playPromptSound = {}, // No beeps per Task J2
             onWakeWordStateRequested = { enable ->
                 if (enable) {
                     abandonDuckingAudioFocus()
@@ -174,7 +239,7 @@ class WakeWordService : Service() {
                     onFailed = { conversationManager.stop() }
                 )
             },
-            followUpTimeoutMs = 30_000L
+            followUpTimeoutMs = com.spidey.assistant.engine.FeatureFlags.sessionTimeoutMs
         )
 
         _activeManager.value = conversationManager
@@ -189,16 +254,55 @@ class WakeWordService : Service() {
             }
         }
 
+        // Bridge engine diagnostics to service StateFlow
+        serviceScope.launch {
+            wakeWordEngine.diagnostics.collectLatest { diag ->
+                _diagnostics.value = diag.copy(isServiceAlive = _isServiceRunning.value)
+            }
+        }
+
         // Start listening for wake word
         wakeWordEngine.start()
     }
 
+    private fun acquireWakeLock() {
+        if (wakeLock == null) {
+            val pm = getSystemService(PowerManager::class.java)
+            wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Spidey::WakeWordService")?.apply {
+                setReferenceCounted(false)
+            }
+        }
+        wakeLock?.let {
+            if (!it.isHeld) {
+                it.acquire()
+                SpikeLogger.log("SPIDEY", "PARTIAL_WAKE_LOCK acquired – CPU active during screen-off")
+            }
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+                SpikeLogger.log("SPIDEY", "WakeLock released")
+            }
+        }
+        wakeLock = null
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            Log.d(TAG, "Received ACTION_STOP intent, shutting down service")
+        val action = intent?.action
+        SpikeLogger.log("SPIDEY", "WakeWordService onStartCommand action=$action")
+        if (action == ACTION_STOP) {
+            SpikeLogger.log("SPIDEY", "Received ACTION_STOP intent, shutting down assistant")
             stopAssistant()
             return START_NOT_STICKY
         }
+        // ACTION_START or null (normal start) — just ensure wake lock is held
+        if (action == ACTION_START) {
+            SpikeLogger.log("SPIDEY", "Received ACTION_START intent (notification or tile)")
+        }
+        acquireWakeLock()
         return START_STICKY
     }
 
@@ -224,36 +328,53 @@ class WakeWordService : Service() {
         val openAppIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         val stopIntent = PendingIntent.getService(
             this,
             1,
-            Intent(this, WakeWordService::class.java).apply { action = ACTION_STOP },
+            Intent(this, WakeWordService::class.java).apply {
+                action = ACTION_STOP
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val statusText = when (state) {
-            AssistantState.SLEEPING -> "Listening for \"Hey Spider\"..."
-            AssistantState.LISTENING -> "Listening to your command..."
-            AssistantState.PROCESSING -> "Processing command..."
-            AssistantState.AWAITING_CONFIRMATION -> "Waiting for confirmation..."
-            AssistantState.AWAITING_UNLOCK -> "Waiting for device unlock..."
-            AssistantState.EXECUTING -> "Executing action..."
+        val startIntent = PendingIntent.getService(
+            this,
+            2,
+            Intent(this, WakeWordService::class.java).apply {
+                action = ACTION_START
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val stateText = when (state) {
+            AssistantState.SLEEPING -> "Listening for 'Hey Spidey'..."
+            AssistantState.LISTENING -> "Listening to your request..."
+            AssistantState.PROCESSING -> "Thinking..."
+            AssistantState.EXECUTING -> "Taking action..."
             AssistantState.SPEAKING -> "Speaking..."
-            AssistantState.ERROR -> "Encountered an issue"
+            AssistantState.AWAITING_UNLOCK -> "Waiting for device unlock..."
+            AssistantState.AWAITING_CONFIRMATION -> "Waiting for confirmation..."
+            AssistantState.ERROR -> "An error occurred."
+            else -> "Active"
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("SPIDEY Voice Assistant")
-            .setContentText(statusText)
+            .setContentText(stateText)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentIntent(openAppIntent)
             .setOngoing(true)
+            .setContentIntent(openAppIntent)
+            .addAction(android.R.drawable.ic_btn_speak_now, "Start", startIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
     }
 
@@ -261,20 +382,40 @@ class WakeWordService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "SPIDEY Voice Assistant",
+                "SPIDEY Foreground Assistant",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows the active status of SPIDEY voice assistant"
+                description = "Shows live status of SPIDEY continuous voice listener"
                 setShowBadge(false)
+            }
+            // Restart prompt channel (shown by BootReceiver when direct start is blocked)
+            val restartChannel = NotificationChannel(
+                RESTART_CHANNEL_ID,
+                "SPIDEY Restart Prompt",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Tap to restart SPIDEY voice listener"
+                setShowBadge(true)
             }
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)
+            nm.createNotificationChannel(restartChannel)
         }
     }
 
     private fun stopAssistant() {
+        try {
+            unregisterReceiver(userPresentReceiver)
+        } catch (_: Exception) {}
+
+        releaseWakeLock()
         _isServiceRunning.value = false
         _activeManager.value = null
+        _diagnostics.value = _diagnostics.value.copy(
+            isServiceAlive = false,
+            isRunning = false,
+            audioFps = 0.0
+        )
         wakeWordEngine.stop()
         speechRecognizerManager.destroy()
         speechOutput.release()
@@ -289,14 +430,42 @@ class WakeWordService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Samsung One UI: swiping from Recents sends a force-stop signal.
+     * Schedule a 3-second AlarmManager restart so the service can recover
+     * as long as the app was NOT explicitly force-stopped by the user in Settings.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        SpikeLogger.log("SPIDEY", "onTaskRemoved – scheduling AlarmManager restart in 3s")
+        val restartIntent = PendingIntent.getService(
+            this,
+            99,
+            Intent(this, WakeWordService::class.java).apply { action = ACTION_START },
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        am.set(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + 3_000L,
+            restartIntent
+        )
+    }
+
     companion object {
         private const val TAG = "WakeWordService"
         const val CHANNEL_ID = "spidey_voice_assistant_channel"
         const val NOTIFICATION_ID = 2001
         const val ACTION_STOP = "com.spidey.assistant.ACTION_STOP"
+        const val ACTION_START = "com.spidey.assistant.ACTION_START"
+        const val RESTART_NOTIFICATION_ID = 2002
+        const val RESTART_CHANNEL_ID = "spidey_restart_channel"
 
         private val _isServiceRunning = MutableStateFlow(false)
         val isServiceRunning = _isServiceRunning.asStateFlow()
+
+        private val _diagnostics = MutableStateFlow(WakeWordDiagnostics())
+        val diagnostics: StateFlow<WakeWordDiagnostics> = _diagnostics.asStateFlow()
 
         private val _activeManager = MutableStateFlow<ConversationManager?>(null)
         val activeManager = _activeManager.asStateFlow()
@@ -315,6 +484,50 @@ class WakeWordService : Service() {
                 action = ACTION_STOP
             }
             context.startService(intent)
+        }
+
+        /**
+         * Posts a high-priority "Tap to start SPIDEY" notification.
+         * Used by BootReceiver because Android 15 blocks direct startForegroundService
+         * from a BOOT_COMPLETED receiver that does not have a BFSL exemption.
+         * The user taps the notification → startForegroundService fires from foreground context.
+         */
+        fun postRestartNotification(context: Context, reason: String) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+            // Ensure channel exists
+            if (nm.getNotificationChannel(RESTART_CHANNEL_ID) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        RESTART_CHANNEL_ID,
+                        "SPIDEY Restart Prompt",
+                        NotificationManager.IMPORTANCE_HIGH
+                    ).apply { description = "Tap to restart SPIDEY voice listener" }
+                )
+            }
+
+            val tapIntent = PendingIntent.getForegroundService(
+                context,
+                200,
+                Intent(context, WakeWordService::class.java).apply { action = ACTION_START },
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(context, RESTART_CHANNEL_ID)
+                .setContentTitle("SPIDEY is not listening")
+                .setContentText("Tap to start: $reason")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setAutoCancel(true)
+                .setContentIntent(tapIntent)
+                .addAction(android.R.drawable.ic_btn_speak_now, "Start Listening", tapIntent)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .build()
+
+            nm.notify(RESTART_NOTIFICATION_ID, notification)
+            Log.i("WakeWordService", "postRestartNotification posted: $reason")
         }
     }
 }

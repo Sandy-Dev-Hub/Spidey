@@ -12,6 +12,7 @@ import com.spidey.assistant.core.AssistantState
 import com.spidey.assistant.core.ConversationManager
 import com.spidey.assistant.core.IntentEngine
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -184,7 +185,9 @@ class ConversationManagerTest {
             scope = testScope,
             speak = { text, onDone ->
                 spokenMessages.add(text)
-                onDone()
+                testScope.launch {
+                    onDone()
+                }
             },
             playPromptSound = {},
             onWakeWordStateRequested = { enabled -> wakeWordState = enabled },
@@ -217,7 +220,9 @@ class ConversationManagerTest {
             scope = testScope,
             speak = { text, onDone ->
                 spokenMessages.add(text)
-                onDone()
+                testScope.launch {
+                    onDone()
+                }
             },
             playPromptSound = {},
             onWakeWordStateRequested = { enabled -> wakeWordState = enabled },

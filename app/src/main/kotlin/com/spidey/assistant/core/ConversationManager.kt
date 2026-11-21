@@ -2,6 +2,10 @@ package com.spidey.assistant.core
 
 import com.spidey.assistant.actions.AssistantAction
 import com.spidey.assistant.actions.StopAction
+import com.spidey.assistant.actions.UnlockAction
+import com.spidey.assistant.engine.BrainEngine
+import com.spidey.assistant.engine.LatencyTracer
+import com.spidey.assistant.engine.LegacyBrainEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,6 +25,10 @@ class ConversationManager(
     private val intentEngine: IntentEngine,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main + Job()),
     private val speak: (text: String, onDone: () -> Unit) -> Unit = { _, onDone -> onDone() },
+    private val speakStream: ((chunk: String, isFirst: Boolean, isLast: Boolean, onDone: (() -> Unit)?) -> Unit) = { chunk, _, _, onDone ->
+        speak(chunk) { onDone?.invoke() }
+    },
+    private val brainEngine: BrainEngine = LegacyBrainEngine(),
     private val playPromptSound: () -> Unit = {},
     private val onWakeWordStateRequested: (enable: Boolean) -> Unit = {},
     private val onStartSpeechListeningRequested: () -> Unit = {},
@@ -49,6 +57,8 @@ class ConversationManager(
     private var isSessionActive = false
     private var sessionTimeoutJob: Job? = null
     private var lastOpenedApp: String? = null
+    private var lastSearchQuery: String? = null
+    private var currentSongIndex: Int = 1
 
     private fun resetSessionTimeout() {
         if (followUpTimeoutMs <= 0L) return
@@ -64,18 +74,16 @@ class ConversationManager(
     }
 
     private fun endSessionAndSleep() {
-        isSessionActive = false
-        lastOpenedApp = null
-        sessionTimeoutJob?.cancel()
-        sessionTimeoutJob = null
-        onStopSpeechListeningRequested()
-        returnToSleeping()
+        returnToSleeping(keepSession = false)
     }
 
     /**
      * Called when the wake word is detected ("Hey Spider" / "Spider").
+     * If an inline command was spoken in the same breath (e.g. "hey spider unlock my phone"),
+     * it can execute immediately without waiting for a re-prompt.
      */
-    fun onWakeWordDetected() {
+    fun onWakeWordDetected(inlineCommand: String? = null) {
+        LatencyTracer.mark(LatencyTracer.Phase.WAKE_DETECTED)
         scope.launch {
             mutex.withLock {
                 if (_state.value == AssistantState.PROCESSING ||
@@ -84,6 +92,7 @@ class ConversationManager(
                     return@withLock
                 }
 
+                val isNewSession = !isSessionActive
                 if (followUpTimeoutMs > 0L) {
                     isSessionActive = true
                     resetSessionTimeout()
@@ -93,19 +102,52 @@ class ConversationManager(
 
                 emptySpeechAttempts = 0
                 _errorText.value = null
-                _state.value = AssistantState.LISTENING
 
                 // 1. Explicitly pause wake word to release mic
                 onWakeWordStateRequested(false)
 
-                // 2. Play acoustic prompt cue (beep or tone)
-                playPromptSound()
+                // If user spoke the command in the same breath, try executing it immediately
+                if (!inlineCommand.isNullOrBlank()) {
+                    val baseCandidates = activeClarificationCandidates
+                    activeClarificationCandidates = emptyList()
+                    val candidates = mutableListOf<String>()
+                    candidates.addAll(baseCandidates)
+                    if (lastOpenedApp != null) {
+                        candidates.add(if (lastOpenedApp == "youtube") "context:youtube" else "context:$lastOpenedApp")
+                    }
+                    if (!lastSearchQuery.isNullOrBlank()) {
+                        candidates.add("query:$lastSearchQuery")
+                    }
+                    val action = intentEngine.parse(inlineCommand.trim(), candidates)
+                    if (action != null) {
+                        _lastHeardText.value = inlineCommand.trim()
+                        executeAction(action)
+                        return@withLock
+                    }
+                }
 
-                // Delay to ensure mic hardware finishes releasing and prompt tone sounds
-                kotlinx.coroutines.delay(350)
-
-                // 3. Start bounded speech recognition
-                onStartSpeechListeningRequested()
+                // If followUpTimeoutMs is enabled (active session mode), greet with bro greeting on fresh wake
+                if (followUpTimeoutMs > 0L) {
+                    if (isNewSession) {
+                        val greeting = com.spidey.assistant.personality.SpideyPersona.randomGreeting()
+                        speakResponse(greeting) {
+                            _state.value = AssistantState.LISTENING
+                            if (isSessionActive) {
+                                onStartSpeechListeningRequested()
+                            }
+                        }
+                    } else {
+                        // Session already active: NO greeting, NO beep — keep listening silently
+                        _state.value = AssistantState.LISTENING
+                        kotlinx.coroutines.delay(100)
+                        onStartSpeechListeningRequested()
+                    }
+                } else {
+                    // Backward-compatible single-turn mode (followUpTimeoutMs = 0)
+                    _state.value = AssistantState.LISTENING
+                    kotlinx.coroutines.delay(100)
+                    onStartSpeechListeningRequested()
+                }
             }
         }
     }
@@ -113,13 +155,14 @@ class ConversationManager(
     /**
      * Called when the speech recognizer returns final recognized text.
      */
-    fun onSpeechRecognized(text: String) {
+    fun onSpeechRecognized(text: String, alternatives: List<String> = emptyList()) {
         scope.launch {
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
 
                 val trimmed = text.trim()
                 _lastHeardText.value = trimmed
+                LatencyTracer.mark(LatencyTracer.Phase.TEXT_READY)
 
                 if (trimmed.isBlank()) {
                     handleEmptySpeech()
@@ -131,14 +174,32 @@ class ConversationManager(
 
                 val baseCandidates = activeClarificationCandidates
                 activeClarificationCandidates = emptyList()
-                val candidates = when {
-                    lastOpenedApp == "youtube" -> baseCandidates + "context:youtube"
-                    lastOpenedApp != null -> baseCandidates + "context:$lastOpenedApp"
-                    else -> baseCandidates
+                val candidates = mutableListOf<String>()
+                candidates.addAll(baseCandidates)
+                if (lastOpenedApp != null) {
+                    candidates.add(if (lastOpenedApp == "youtube") "context:youtube" else "context:$lastOpenedApp")
+                }
+                if (!lastSearchQuery.isNullOrBlank()) {
+                    candidates.add("query:$lastSearchQuery")
+                    candidates.add("index:$currentSongIndex")
                 }
 
-                val action = intentEngine.parse(trimmed, candidates)
+                var action = intentEngine.parse(trimmed, candidates)
+                if (action == null && alternatives.isNotEmpty()) {
+                    for (alt in alternatives) {
+                        val altTrimmed = alt.trim()
+                        if (altTrimmed.isNotBlank() && !altTrimmed.equals(trimmed, ignoreCase = true)) {
+                            action = intentEngine.parse(altTrimmed, candidates)
+                            if (action != null) {
+                                _lastHeardText.value = altTrimmed
+                                break
+                            }
+                        }
+                    }
+                }
+
                 if (action != null) {
+                    LatencyTracer.mark(LatencyTracer.Phase.INTENT_DECIDED)
                     executeAction(action)
                 } else {
                     speakResponse(
@@ -164,15 +225,8 @@ class ConversationManager(
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
                 if (isSessionActive) {
-                    // In continuous conversation window: seamlessly re-arm speech recognition
-                    scope.launch {
-                        kotlinx.coroutines.delay(250)
-                        mutex.withLock {
-                            if (isSessionActive && _state.value == AssistantState.LISTENING) {
-                                onStartSpeechListeningRequested()
-                            }
-                        }
-                    }
+                    // Turn timed out without speech; be subtle and wait on wake word while session remains active
+                    returnToSleeping(keepSession = true)
                 } else {
                     handleEmptySpeech()
                 }
@@ -191,15 +245,8 @@ class ConversationManager(
                 val isTransientOrSilence = errorCode in setOf(1, 2, 3, 5, 6, 7, 8, 11)
 
                 if (isSessionActive) {
-                    // Seamlessly re-arm speech recognition in follow-up mode
-                    scope.launch {
-                        kotlinx.coroutines.delay(350)
-                        mutex.withLock {
-                            if (isSessionActive && _state.value == AssistantState.LISTENING) {
-                                onStartSpeechListeningRequested()
-                            }
-                        }
-                    }
+                    // Turn encountered silence or error in follow-up mode; be subtle and wait on wake word while session remains active
+                    returnToSleeping(keepSession = true)
                 } else {
                     if (isTransientOrSilence && emptySpeechAttempts == 0) {
                         handleEmptySpeech()
@@ -222,9 +269,7 @@ class ConversationManager(
             mutex.withLock {
                 val action = pendingActionAfterUnlock ?: return@withLock
                 pendingActionAfterUnlock = null
-                if (_state.value == AssistantState.AWAITING_UNLOCK) {
-                    executeAction(action)
-                }
+                executeAction(action)
             }
         }
     }
@@ -242,22 +287,78 @@ class ConversationManager(
     }
 
     private suspend fun executeAction(action: AssistantAction) {
+        if (action is com.spidey.assistant.actions.ChatAction) {
+            _state.value = AssistantState.EXECUTING
+            LatencyTracer.mark(LatencyTracer.Phase.ACTION_STARTED)
+            var isFirst = true
+            val fullReply = brainEngine.streamReply(action.message) { chunk ->
+                if (isFirst) {
+                    LatencyTracer.mark(LatencyTracer.Phase.FIRST_AUDIO)
+                    LatencyTracer.finishRound()
+                    _state.value = AssistantState.SPEAKING
+                    onWakeWordStateRequested(false)
+                }
+                _lastSpokenResponse.value = chunk
+                speakStream(chunk, isFirst, false, null)
+                isFirst = false
+            }
+            _lastSpokenResponse.value = fullReply
+            speakStream("", false, true) {
+                if (isSessionActive) {
+                    enterFollowUpListening()
+                } else {
+                    returnToSleeping()
+                }
+            }
+            return
+        }
+
         if (action is com.spidey.assistant.actions.OpenAppAction) {
             lastOpenedApp = if (action.appName.contains("youtube", ignoreCase = true) || (action.packageName?.contains("youtube", ignoreCase = true) == true)) {
                 "youtube"
+            } else if (action.appName.contains("spotify", ignoreCase = true) || (action.packageName?.contains("spotify", ignoreCase = true) == true)) {
+                "spotify"
+            } else if (action.appName.contains("whatsapp", ignoreCase = true) || (action.packageName?.contains("whatsapp", ignoreCase = true) == true)) {
+                "whatsapp"
             } else {
                 action.appName.lowercase()
             }
         } else if (action is com.spidey.assistant.actions.SearchYouTubeAction) {
             lastOpenedApp = "youtube"
+            lastSearchQuery = action.query
+            currentSongIndex = 1
+        } else if (action is com.spidey.assistant.actions.PlayFirstResultAction) {
+            lastOpenedApp = action.targetApp
+            if (!action.query.isNullOrBlank()) {
+                lastSearchQuery = action.query
+            }
+            currentSongIndex = action.itemIndex
+        } else if (action is com.spidey.assistant.actions.PlaySpotifyAction) {
+            lastOpenedApp = "spotify"
+            if (action.query.isNotBlank() && action.query != "next" && action.query != "resume") {
+                lastSearchQuery = action.query
+            }
+            currentSongIndex = 1
+        } else if (action is com.spidey.assistant.actions.WhatsAppCallAction) {
+            lastOpenedApp = "whatsapp"
         }
 
         _state.value = AssistantState.EXECUTING
+        LatencyTracer.mark(LatencyTracer.Phase.ACTION_STARTED)
         when (val result = actionRouter.route(action)) {
             is ActionResult.Success -> {
                 speakResponse(result.spokenMessage) {
                     if (action is StopAction) {
                         endSessionAndSleep()
+                    } else if (action is com.spidey.assistant.actions.PlayFirstResultAction ||
+                        action is com.spidey.assistant.actions.SearchYouTubeAction ||
+                        action is com.spidey.assistant.actions.PlaySpotifyAction ||
+                        action is com.spidey.assistant.actions.WhatsAppCallAction ||
+                        action is com.spidey.assistant.actions.OpenAppAction ||
+                        action is com.spidey.assistant.actions.CallContactAction
+                    ) {
+                        // Media playing or app launched: be subtle, return to sleeping while keeping session active
+                        returnToSleeping(keepSession = isSessionActive)
                     } else if (isSessionActive) {
                         enterFollowUpListening()
                     } else {
@@ -266,10 +367,17 @@ class ConversationManager(
                 }
             }
             is ActionResult.NeedsUnlock -> {
-                pendingActionAfterUnlock = action
-                speakResponse("Please unlock your phone to continue.") {
-                    _state.value = AssistantState.AWAITING_UNLOCK
-                    onUnlockRequested(action)
+                pendingActionAfterUnlock = if (action is UnlockAction) {
+                    UnlockAction(wasPrompted = true)
+                } else {
+                    action
+                }
+                _state.value = AssistantState.AWAITING_UNLOCK
+                onUnlockRequested(action)
+                speakResponse("Please enter your PIN or use your fingerprint.") {
+                    if (pendingActionAfterUnlock != null) {
+                        _state.value = AssistantState.AWAITING_UNLOCK
+                    }
                 }
             }
             is ActionResult.Failure -> {
@@ -287,7 +395,14 @@ class ConversationManager(
                 speakResponse(result.question) {
                     // Re-enter listening for the user's answer
                     _state.value = AssistantState.LISTENING
-                    onStartSpeechListeningRequested()
+                    scope.launch {
+                        kotlinx.coroutines.delay(250)
+                        mutex.withLock {
+                            if (_state.value == AssistantState.LISTENING) {
+                                onStartSpeechListeningRequested()
+                            }
+                        }
+                    }
                 }
             }
             is ActionResult.Cancelled -> {
@@ -299,6 +414,7 @@ class ConversationManager(
     private fun enterFollowUpListening() {
         emptySpeechAttempts = 0
         _state.value = AssistantState.LISTENING
+        resetSessionTimeout()
         onWakeWordStateRequested(false)
         scope.launch {
             kotlinx.coroutines.delay(200)
@@ -323,6 +439,8 @@ class ConversationManager(
     }
 
     private fun speakResponse(text: String, andThen: () -> Unit) {
+        LatencyTracer.mark(LatencyTracer.Phase.FIRST_AUDIO)
+        LatencyTracer.finishRound()
         _lastSpokenResponse.value = text
         _state.value = AssistantState.SPEAKING
         // Wake engine must stay disabled while speaking
@@ -337,12 +455,20 @@ class ConversationManager(
         }
     }
 
-    private fun returnToSleeping() {
+    private fun returnToSleeping(keepSession: Boolean = false) {
         activeClarificationCandidates = emptyList()
         emptySpeechAttempts = 0
-        lastOpenedApp = null
+        if (!keepSession) {
+            isSessionActive = false
+            lastOpenedApp = null
+            lastSearchQuery = null
+            currentSongIndex = 1
+            sessionTimeoutJob?.cancel()
+            sessionTimeoutJob = null
+        }
         _state.value = AssistantState.SLEEPING
         _errorText.value = null
+        onStopSpeechListeningRequested()
         // Re-arm wake word spotter
         onWakeWordStateRequested(true)
     }
