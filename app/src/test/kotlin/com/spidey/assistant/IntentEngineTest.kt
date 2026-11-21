@@ -889,7 +889,7 @@ class IntentEngineTest {
         assertFalse(edited.isConfirmed)
         assertEquals("I will be there at 10", edited.body)
 
-        // Variations of quick edit: "change 5 to 6", "change 5 2 6", "change five to six", "no change 5 to 6"
+        // Variations of quick edit: "change 5 to 6", "change 5 2 6", "change 526", "526", "change five to six", "no change 5 to 6"
         val meetContext = listOf("confirm_message", "recipient:Amma", "body:meet me at 5", "platform:WHATSAPP")
 
         val edit5to6 = intentEngine.parse("change 5 to 6", meetContext) as com.spidey.assistant.actions.SendMessageAction
@@ -897,6 +897,15 @@ class IntentEngineTest {
 
         val edit526 = intentEngine.parse("change 5 2 6", meetContext) as com.spidey.assistant.actions.SendMessageAction
         assertEquals("meet me at 6", edit526.body)
+
+        val edit526NoSpace = intentEngine.parse("change 526", meetContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6", edit526NoSpace.body)
+
+        val direct526 = intentEngine.parse("526", meetContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6", direct526.body)
+
+        val direct5to6 = intentEngine.parse("5 to 6", meetContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6", direct5to6.body)
 
         val editWords = intentEngine.parse("change five to six", meetContext) as com.spidey.assistant.actions.SendMessageAction
         assertEquals("meet me at 6", editWords.body)
@@ -907,6 +916,17 @@ class IntentEngineTest {
 
         val editMakeIt = intentEngine.parse("make it 6", meetContext) as com.spidey.assistant.actions.SendMessageAction
         assertEquals("meet me at 6", editMakeIt.body)
+
+        // Time format tests ("meet me at 5:00")
+        val timeContext = listOf("confirm_message", "recipient:Amma", "body:meet me at 5:00", "platform:WHATSAPP")
+        val editTime526 = intentEngine.parse("change 526", timeContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6:00", editTime526.body)
+
+        val editTime5to6 = intentEngine.parse("change 5 to 6", timeContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6:00", editTime5to6.body)
+
+        val editTime5to630 = intentEngine.parse("change 5 to 6:30", timeContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6:30", editTime5to630.body)
 
         val dictateContext = listOf("dictate_message", "recipient:Amma", "platform:WHATSAPP")
         val dictateAction = intentEngine.parse("Please call me back", dictateContext)

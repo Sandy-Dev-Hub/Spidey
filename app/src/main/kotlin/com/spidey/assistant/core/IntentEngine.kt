@@ -369,7 +369,11 @@ class IntentEngine {
 
             val cleanReply = reply.trim().lowercase()
             var normalizedReply = cleanReply
-            normalizedReply = normalizedReply.replace(Regex("(?<=\\w)\\s+2\\s+(?=\\w)"), " to ")
+            normalizedReply = normalizedReply
+                .replace(Regex("(?<=\\d)2(?=\\d)"), " to ")
+                .replace(Regex("(?<=\\d)\\s*2\\s*(?=\\d)"), " to ")
+                .replace(Regex("(?<=\\w)\\s+2\\s+(?=\\w)"), " to ")
+
             if (normalizedReply.startsWith("no ") || normalizedReply.startsWith("no, ")) {
                 val withoutNo = normalizedReply.replace(Regex("^no[,\\s]+"), "").trim()
                 if (withoutNo.startsWith("change ") || withoutNo.startsWith("replace ") || withoutNo.startsWith("make it ") || withoutNo.startsWith("set it to ")) {
@@ -412,7 +416,23 @@ class IntentEngine {
                 )
             }
 
-            // 3. "make it <replacement>" or "set it to <replacement>"
+            // 3. Direct "<x> to <y>" without "change" verb: e.g. "5 to 6", "526", "5 2 6"
+            val directXtoYRegex = Regex("^(\\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten)\\s+(?:to|with)\\s+(\\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten)$", RegexOption.IGNORE_CASE)
+            val directMatch = directXtoYRegex.find(normalizedReply)
+            if (directMatch != null) {
+                val target = directMatch.groupValues[1].trim()
+                val replacement = directMatch.groupValues[2].trim()
+                val updatedBody = applyBodyEdit(body, target, replacement)
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = updatedBody,
+                    platform = platform,
+                    subject = subject,
+                    isConfirmed = false
+                )
+            }
+
+            // 4. "make it <replacement>" or "set it to <replacement>"
             val makeItRegex = Regex("^(?:make\\s+it|set\\s+it\\s+to)\\s+(.*)$", RegexOption.IGNORE_CASE)
             val makeItMatch = makeItRegex.find(normalizedReply)
             if (makeItMatch != null) {
@@ -427,7 +447,7 @@ class IntentEngine {
                 )
             }
 
-            // 4. Confirm / Cancel words
+            // 5. Confirm / Cancel words
             val confirmWords = setOf("yes", "yeah", "yep", "send", "send it", "confirm", "sure", "ok", "okay", "do it", "please send", "go ahead")
             val cancelWords = setOf("no", "nope", "cancel", "stop", "don't send", "dont send", "cancel it", "discard", "abort")
 
@@ -450,11 +470,16 @@ class IntentEngine {
                 )
             }
 
-            // 5. Direct dictated revision without explicit "change" verb
+            // 6. Direct dictated revision without explicit "change" verb
             if (cleanReply.isNotBlank() && !isStopCommand(reply)) {
+                val finalBody = if (normalizedReply.startsWith("change ")) {
+                    normalizedReply.removePrefix("change ").trim()
+                } else {
+                    reply.trim()
+                }
                 return com.spidey.assistant.actions.SendMessageAction(
                     recipient = recipient,
-                    body = reply.trim(),
+                    body = finalBody,
                     platform = platform,
                     subject = subject,
                     isConfirmed = false
@@ -1427,16 +1452,33 @@ class IntentEngine {
     }
 
     private fun applyBodyEdit(body: String, target: String, replacement: String): String {
-        // Direct case-insensitive replacement
-        val direct = body.replace(Regex(Regex.escape(target), RegexOption.IGNORE_CASE), replacement)
-        if (direct != body) return direct
-
         val numberMap = mapOf(
             "zero" to "0", "one" to "1", "two" to "2", "three" to "3", "four" to "4",
             "five" to "5", "six" to "6", "seven" to "7", "eight" to "8", "nine" to "9", "ten" to "10"
         )
         val targetLower = target.lowercase()
         val replacementDigit = numberMap[replacement.lowercase()] ?: replacement
+
+        // 1. Time format support: target is "5", body has "5:00" or "5:30"
+        if (target.all { it.isDigit() }) {
+            val timeRegex = Regex("\\b${Regex.escape(target)}:(\\d{2})\\b")
+            val match = timeRegex.find(body)
+            if (match != null) {
+                val mins = match.groupValues[1]
+                val repTime = if (replacement.contains(":")) {
+                    replacement
+                } else if (replacement.all { it.isDigit() }) {
+                    if (mins == "00") "$replacement:00" else "$replacement:$mins"
+                } else {
+                    replacement
+                }
+                return body.replace(timeRegex, repTime)
+            }
+        }
+
+        // 2. Direct case-insensitive replacement
+        val direct = body.replace(Regex(Regex.escape(target), RegexOption.IGNORE_CASE), replacement)
+        if (direct != body) return direct
 
         // If target is a number word ("five") and body has digit ("5")
         val digitForTarget = numberMap[targetLower]
