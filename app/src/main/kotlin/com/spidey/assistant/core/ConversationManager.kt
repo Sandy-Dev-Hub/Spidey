@@ -202,6 +202,9 @@ class ConversationManager(
                     LatencyTracer.mark(LatencyTracer.Phase.INTENT_DECIDED)
                     executeAction(action)
                 } else {
+                    if (isSessionActive && baseCandidates.isNotEmpty()) {
+                        activeClarificationCandidates = baseCandidates
+                    }
                     speakResponse(
                         text = "I didn't understand that.",
                         andThen = {
@@ -457,9 +460,8 @@ class ConversationManager(
     }
 
     private fun returnToSleeping(keepSession: Boolean = false) {
-        activeClarificationCandidates = emptyList()
-        emptySpeechAttempts = 0
         if (!keepSession) {
+            activeClarificationCandidates = emptyList()
             isSessionActive = false
             lastOpenedApp = null
             lastSearchQuery = null
@@ -467,6 +469,7 @@ class ConversationManager(
             sessionTimeoutJob?.cancel()
             sessionTimeoutJob = null
         }
+        emptySpeechAttempts = 0
         _state.value = AssistantState.SLEEPING
         _errorText.value = null
         onStopSpeechListeningRequested()

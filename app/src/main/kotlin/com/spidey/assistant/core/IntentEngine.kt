@@ -368,10 +368,70 @@ class IntentEngine {
             val platform = try { com.spidey.assistant.actions.MessagePlatform.valueOf(platformStr) } catch (_: Exception) { com.spidey.assistant.actions.MessagePlatform.WHATSAPP }
 
             val cleanReply = reply.trim().lowercase()
-            val confirmWords = setOf("yes", "yeah", "yep", "send", "send it", "confirm", "sure", "ok", "okay", "do it")
-            val cancelWords = setOf("no", "nope", "cancel", "stop", "don't send", "dont send", "cancel it", "discard")
+            var normalizedReply = cleanReply
+            normalizedReply = normalizedReply.replace(Regex("(?<=\\w)\\s+2\\s+(?=\\w)"), " to ")
+            if (normalizedReply.startsWith("no ") || normalizedReply.startsWith("no, ")) {
+                val withoutNo = normalizedReply.replace(Regex("^no[,\\s]+"), "").trim()
+                if (withoutNo.startsWith("change ") || withoutNo.startsWith("replace ") || withoutNo.startsWith("make it ") || withoutNo.startsWith("set it to ")) {
+                    normalizedReply = withoutNo
+                }
+            }
 
-            if (confirmWords.any { cleanReply == it || cleanReply.startsWith(it) }) {
+            // 1. Direct message rewrite: "change message to <body>" or "change to <body>"
+            if (normalizedReply.startsWith("change message to ") || normalizedReply.startsWith("change to ") || normalizedReply.startsWith("change message ") || normalizedReply.startsWith("change body to ")) {
+                val newBody = normalizedReply
+                    .removePrefix("change message to ")
+                    .removePrefix("change to ")
+                    .removePrefix("change message ")
+                    .removePrefix("change body to ")
+                    .trim()
+                if (newBody.isNotBlank()) {
+                    return com.spidey.assistant.actions.SendMessageAction(
+                        recipient = recipient,
+                        body = newBody,
+                        platform = platform,
+                        subject = subject,
+                        isConfirmed = false
+                    )
+                }
+            }
+
+            // 2. Quick edit: "change <target> to <replacement>" or "replace <target> with <replacement>"
+            val changeRegex = Regex("^(?:change|replace)\\s+(?:the\\s+)?(.*?)\\s+(?:to|with)\\s+(.*)$", RegexOption.IGNORE_CASE)
+            val match = changeRegex.find(normalizedReply)
+            if (match != null) {
+                val target = match.groupValues[1].trim()
+                val replacement = match.groupValues[2].trim()
+                val updatedBody = applyBodyEdit(body, target, replacement)
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = updatedBody,
+                    platform = platform,
+                    subject = subject,
+                    isConfirmed = false
+                )
+            }
+
+            // 3. "make it <replacement>" or "set it to <replacement>"
+            val makeItRegex = Regex("^(?:make\\s+it|set\\s+it\\s+to)\\s+(.*)$", RegexOption.IGNORE_CASE)
+            val makeItMatch = makeItRegex.find(normalizedReply)
+            if (makeItMatch != null) {
+                val replacement = makeItMatch.groupValues[1].trim()
+                val updatedBody = applyBodyEdit(body, "it", replacement)
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = recipient,
+                    body = updatedBody,
+                    platform = platform,
+                    subject = subject,
+                    isConfirmed = false
+                )
+            }
+
+            // 4. Confirm / Cancel words
+            val confirmWords = setOf("yes", "yeah", "yep", "send", "send it", "confirm", "sure", "ok", "okay", "do it", "please send", "go ahead")
+            val cancelWords = setOf("no", "nope", "cancel", "stop", "don't send", "dont send", "cancel it", "discard", "abort")
+
+            if (confirmWords.any { cleanReply == it || cleanReply.startsWith("$it ") }) {
                 return com.spidey.assistant.actions.SendMessageAction(
                     recipient = recipient,
                     body = body,
@@ -380,7 +440,7 @@ class IntentEngine {
                     isConfirmed = true
                 )
             }
-            if (cancelWords.any { cleanReply == it || cleanReply.startsWith(it) }) {
+            if (cancelWords.any { cleanReply == it || cleanReply.startsWith("$it ") }) {
                 return com.spidey.assistant.actions.SendMessageAction(
                     recipient = recipient,
                     body = body,
@@ -389,26 +449,12 @@ class IntentEngine {
                     isCancelled = true
                 )
             }
-            if (cleanReply.startsWith("change message to ") || cleanReply.startsWith("change to ")) {
-                val newBody = cleanReply.removePrefix("change message to ").removePrefix("change to ").trim()
+
+            // 5. Direct dictated revision without explicit "change" verb
+            if (cleanReply.isNotBlank() && !isStopCommand(reply)) {
                 return com.spidey.assistant.actions.SendMessageAction(
                     recipient = recipient,
-                    body = newBody,
-                    platform = platform,
-                    subject = subject,
-                    isConfirmed = false
-                )
-            }
-            // Quick edit: "change <x> to <y>"
-            val changeRegex = Regex("^change (.*?) to (.*)$")
-            val match = changeRegex.find(cleanReply)
-            if (match != null) {
-                val target = match.groupValues[1].trim()
-                val replacement = match.groupValues[2].trim()
-                val updatedBody = body.replace(target, replacement, ignoreCase = true)
-                return com.spidey.assistant.actions.SendMessageAction(
-                    recipient = recipient,
-                    body = updatedBody,
+                    body = reply.trim(),
                     platform = platform,
                     subject = subject,
                     isConfirmed = false
@@ -1249,14 +1295,16 @@ class IntentEngine {
         }
 
         // 3. Email Messaging
-        if (clean.startsWith("send an email to ") || clean.startsWith("send email to ") || clean.startsWith("send a mail to ") || clean.startsWith("send mail to ") || clean.startsWith("email ")) {
-            val after = when {
-                clean.startsWith("send an email to ") -> clean.removePrefix("send an email to ")
-                clean.startsWith("send email to ") -> clean.removePrefix("send email to ")
-                clean.startsWith("send a mail to ") -> clean.removePrefix("send a mail to ")
-                clean.startsWith("send mail to ") -> clean.removePrefix("send mail to ")
-                else -> clean.removePrefix("email ")
-            }.trim()
+        val emailPrefixes = listOf(
+            "send an email to ", "send a email to ", "send email to ",
+            "send a mail to ", "send mail to ", "email to ", "email "
+        )
+        val matchedEmail = emailPrefixes.firstOrNull { clean.startsWith(it) }
+        if (matchedEmail != null) {
+            var after = clean.removePrefix(matchedEmail).trim()
+            if (after.startsWith("to ")) {
+                after = after.removePrefix("to ").trim()
+            }
 
             var subject = ""
             var remaining = after
@@ -1285,7 +1333,7 @@ class IntentEngine {
                 )
             }
 
-            val (rawRecipient, body) = splitRecipientAndBody(remaining)
+            val (rawRecipient, body) = splitRecipientAndBody(remaining, isEmail = true)
             val recipient = normalizeEmail(rawRecipient)
             if (recipient.isNotBlank()) {
                 return com.spidey.assistant.actions.SendMessageAction(
@@ -1298,15 +1346,16 @@ class IntentEngine {
         }
 
         // 4. SMS Messaging
-        if (clean.startsWith("send sms to ") || clean.startsWith("send an sms to ") || clean.startsWith("send a text message to ") || clean.startsWith("send a text to ") || clean.startsWith("send text to ") || clean.startsWith("text ")) {
-            val after = when {
-                clean.startsWith("send an sms to ") -> clean.removePrefix("send an sms to ")
-                clean.startsWith("send sms to ") -> clean.removePrefix("send sms to ")
-                clean.startsWith("send a text message to ") -> clean.removePrefix("send a text message to ")
-                clean.startsWith("send a text to ") -> clean.removePrefix("send a text to ")
-                clean.startsWith("send text to ") -> clean.removePrefix("send text to ")
-                else -> clean.removePrefix("text ")
-            }.trim()
+        val smsPrefixes = listOf(
+            "send an sms to ", "send sms to ", "send a text message to ",
+            "send a text to ", "send text to ", "text to ", "text "
+        )
+        val matchedSms = smsPrefixes.firstOrNull { clean.startsWith(it) }
+        if (matchedSms != null) {
+            var after = clean.removePrefix(matchedSms).trim()
+            if (after.startsWith("to ")) {
+                after = after.removePrefix("to ").trim()
+            }
 
             val (recipient, body) = splitRecipientAndBody(after)
             if (recipient.isNotBlank()) {
@@ -1318,10 +1367,33 @@ class IntentEngine {
             }
         }
 
+        // 5. Generic Messaging: "send message to <recipient> [saying <body>]", "send a message to <recipient>"
+        val genericMsgPrefixes = listOf(
+            "send a message to ", "send message to ", "message to ", "message "
+        )
+        val matchedGeneric = genericMsgPrefixes.firstOrNull { clean.startsWith(it) }
+        if (matchedGeneric != null) {
+            val after = clean.removePrefix(matchedGeneric).trim()
+            val (recipient, body) = splitRecipientAndBody(after)
+            if (recipient.isNotBlank() && recipient != "whatsapp" && recipient != "telegram" && recipient != "sms") {
+                val isEmail = recipient.contains("@") || (recipient.contains(" at ") && recipient.contains(" dot "))
+                val platform = if (isEmail) {
+                    com.spidey.assistant.actions.MessagePlatform.EMAIL
+                } else {
+                    com.spidey.assistant.actions.MessagePlatform.WHATSAPP
+                }
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = if (isEmail) normalizeEmail(recipient) else recipient,
+                    body = body,
+                    platform = platform
+                )
+            }
+        }
+
         return null
     }
 
-    private fun splitRecipientAndBody(text: String): Pair<String, String> {
+    private fun splitRecipientAndBody(text: String, isEmail: Boolean = false): Pair<String, String> {
         val delimiters = listOf(" saying ", " that ", ": ")
         for (delim in delimiters) {
             if (text.contains(delim)) {
@@ -1329,6 +1401,23 @@ class IntentEngine {
                 return Pair(parts[0].trim(), parts[1].trim())
             }
         }
+
+        if (isEmail) {
+            val spokenEmailRegex = Regex("^([a-z0-9._%+-]+(?:@|\\s+at\\s+|\\s+at\\s+the\\s+rate\\s+(?:of\\s+)?)[a-z0-9.-]+(?:\\.|\\s+dot\\s+)[a-z]{2,})(.*)$", RegexOption.IGNORE_CASE)
+            val match = spokenEmailRegex.find(text.trim())
+            if (match != null) {
+                val emailPart = match.groupValues[1].trim()
+                var rest = match.groupValues[2].trim()
+                for (d in listOf("saying ", "that ", ": ")) {
+                    if (rest.startsWith(d)) {
+                        rest = rest.removePrefix(d).trim()
+                        break
+                    }
+                }
+                return Pair(emailPart, rest)
+            }
+        }
+
         val words = text.split("\\s+".toRegex())
         return if (words.size > 1) {
             Pair(words[0].trim(), words.drop(1).joinToString(" ").trim())
@@ -1337,15 +1426,59 @@ class IntentEngine {
         }
     }
 
+    private fun applyBodyEdit(body: String, target: String, replacement: String): String {
+        // Direct case-insensitive replacement
+        val direct = body.replace(Regex(Regex.escape(target), RegexOption.IGNORE_CASE), replacement)
+        if (direct != body) return direct
+
+        val numberMap = mapOf(
+            "zero" to "0", "one" to "1", "two" to "2", "three" to "3", "four" to "4",
+            "five" to "5", "six" to "6", "seven" to "7", "eight" to "8", "nine" to "9", "ten" to "10"
+        )
+        val targetLower = target.lowercase()
+        val replacementDigit = numberMap[replacement.lowercase()] ?: replacement
+
+        // If target is a number word ("five") and body has digit ("5")
+        val digitForTarget = numberMap[targetLower]
+        if (digitForTarget != null) {
+            val replaced = body.replace(Regex(Regex.escape(digitForTarget), RegexOption.IGNORE_CASE), replacementDigit)
+            if (replaced != body) return replaced
+        }
+        // If target is a digit ("5") and body has word ("five")
+        val wordForTarget = numberMap.entries.firstOrNull { it.value == target }?.key
+        if (wordForTarget != null) {
+            val replaced = body.replace(Regex(Regex.escape(wordForTarget), RegexOption.IGNORE_CASE), replacement)
+            if (replaced != body) return replaced
+        }
+
+        // If target refers to "it", "that", "the time", "time", "the number", "number"
+        if (targetLower in setOf("it", "that", "the time", "time", "the number", "number") || target.isBlank()) {
+            val numRegex = Regex("\\b(\\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten)\\b", RegexOption.IGNORE_CASE)
+            val numMatch = numRegex.find(body)
+            if (numMatch != null) {
+                val matchedStr = numMatch.value
+                val finalReplacement = if (matchedStr.all { it.isDigit() }) replacementDigit else replacement
+                return body.substring(0, numMatch.range.first) + finalReplacement + body.substring(numMatch.range.last + 1)
+            }
+        }
+
+        // Fallback: if target wasn't found at all, but replacement is a full sentence
+        if (replacement.split("\\s+".toRegex()).size >= 3) {
+            return replacement
+        }
+
+        return body.replace(target, replacement, ignoreCase = true)
+    }
+
     private fun normalizeEmail(raw: String): String {
         var res = raw.trim().lowercase()
-        if (res.contains(" at ") || res.contains(" dot ")) {
-            res = res
-                .replace(" at the rate ", "@")
-                .replace(" at the rate of ", "@")
-                .replace(" at ", "@")
-                .replace(" dot ", ".")
-                .replace(" ", "")
+        res = res
+            .replace(" at the rate of ", "@")
+            .replace(" at the rate ", "@")
+            .replace(" at ", "@")
+            .replace(" dot ", ".")
+        if (res.contains("@")) {
+            res = res.replace(" ", "")
         }
         return res
     }

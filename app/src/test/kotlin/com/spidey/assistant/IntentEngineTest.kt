@@ -889,11 +889,51 @@ class IntentEngineTest {
         assertFalse(edited.isConfirmed)
         assertEquals("I will be there at 10", edited.body)
 
+        // Variations of quick edit: "change 5 to 6", "change 5 2 6", "change five to six", "no change 5 to 6"
+        val meetContext = listOf("confirm_message", "recipient:Amma", "body:meet me at 5", "platform:WHATSAPP")
+
+        val edit5to6 = intentEngine.parse("change 5 to 6", meetContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6", edit5to6.body)
+
+        val edit526 = intentEngine.parse("change 5 2 6", meetContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6", edit526.body)
+
+        val editWords = intentEngine.parse("change five to six", meetContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6", editWords.body)
+
+        val editWithNo = intentEngine.parse("no change 5 to 6", meetContext) as com.spidey.assistant.actions.SendMessageAction
+        assertFalse(editWithNo.isCancelled)
+        assertEquals("meet me at 6", editWithNo.body)
+
+        val editMakeIt = intentEngine.parse("make it 6", meetContext) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("meet me at 6", editMakeIt.body)
+
         val dictateContext = listOf("dictate_message", "recipient:Amma", "platform:WHATSAPP")
         val dictateAction = intentEngine.parse("Please call me back", dictateContext)
         assertTrue(dictateAction is com.spidey.assistant.actions.SendMessageAction)
         val dictated = dictateAction as com.spidey.assistant.actions.SendMessageAction
         assertFalse(dictated.isConfirmed)
         assertEquals("please call me back", dictated.body)
+    }
+
+    @Test
+    fun testEmailParsingVariations() {
+        val a1 = intentEngine.parse("send an email to vikki@gmail.com") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikki@gmail.com", a1.recipient)
+        assertEquals("", a1.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.EMAIL, a1.platform)
+
+        val a2 = intentEngine.parse("send a email to vikki@gmail.com saying meet me at 5") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikki@gmail.com", a2.recipient)
+        assertEquals("meet me at 5", a2.body)
+
+        val a3 = intentEngine.parse("send email to vikki at gmail dot com") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikki@gmail.com", a3.recipient)
+        assertEquals("", a3.body)
+
+        val a4 = intentEngine.parse("send message to Amma saying hello") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("amma", a4.recipient)
+        assertEquals("hello", a4.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.WHATSAPP, a4.platform)
     }
 }

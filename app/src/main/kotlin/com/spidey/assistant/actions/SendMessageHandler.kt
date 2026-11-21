@@ -126,15 +126,14 @@ class SendMessageHandler(
     }
 
     private suspend fun sendEmail(recipient: String, body: String, subject: String): ActionResult {
-        val email = if (recipient.contains("@")) {
-            recipient.trim()
-        } else {
-            recipient.trim()
-        }
+        val email = cleanEmail(recipient)
 
         val mailSubject = subject.ifBlank { "Message from Spidey" }
         val mailtoUri = Uri.parse("mailto:$email?subject=${Uri.encode(mailSubject)}&body=${Uri.encode(body)}")
         val emailIntent = Intent(Intent.ACTION_SENDTO, mailtoUri).apply {
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
+            putExtra(Intent.EXTRA_SUBJECT, mailSubject)
+            putExtra(Intent.EXTRA_TEXT, body)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
 
@@ -145,7 +144,7 @@ class SendMessageHandler(
 
         if (SpideyAccessibilityService.isAvailable()) {
             delay(1200)
-            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail() == true
+            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 4000L) == true
             return if (clicked) {
                 ActionResult.Success(spokenMessage = "Email sent to $email boss.")
             } else {
@@ -154,6 +153,18 @@ class SendMessageHandler(
         } else {
             return ActionResult.Success(spokenMessage = "I prepared your email for $email boss. Please tap Send to deliver it.")
         }
+    }
+
+    private fun cleanEmail(raw: String): String {
+        var s = raw.trim().lowercase()
+        s = s.replace(" at the rate of ", "@")
+            .replace(" at the rate ", "@")
+            .replace(" at ", "@")
+            .replace(" dot ", ".")
+        if (s.contains("@")) {
+            s = s.replace(" ", "")
+        }
+        return s
     }
 
     private suspend fun sendSms(recipient: String, body: String): ActionResult {

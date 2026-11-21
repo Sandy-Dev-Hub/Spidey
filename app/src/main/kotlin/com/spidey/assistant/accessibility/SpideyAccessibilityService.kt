@@ -85,7 +85,7 @@ class SpideyAccessibilityService : AccessibilityService() {
         return false
     }
 
-    suspend fun clickSendInGmail(timeoutMs: Long = 3500L): Boolean {
+    suspend fun clickSendInGmail(timeoutMs: Long = 4000L): Boolean {
         val startTime = System.currentTimeMillis()
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             val root = rootInActiveWindow
@@ -100,7 +100,8 @@ class SpideyAccessibilityService : AccessibilityService() {
                 val descNodes = root.findAccessibilityNodeInfosByText("Send")
                 for (node in descNodes) {
                     val desc = node.contentDescription?.toString()
-                    if (desc.equals("Send", ignoreCase = true)) {
+                    val text = node.text?.toString()
+                    if (desc.equals("Send", ignoreCase = true) || text.equals("Send", ignoreCase = true)) {
                         if (clickNodeOrParent(node)) return true
                     }
                 }
@@ -112,13 +113,13 @@ class SpideyAccessibilityService : AccessibilityService() {
 
     private fun clickNodeOrParent(node: AccessibilityNodeInfo): Boolean {
         if (node.isPassword) return false
-        if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+        if (node.isClickable && node.isEnabled && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
             return true
         }
         var parent = node.parent
         while (parent != null) {
             if (parent.isPassword) return false
-            if (parent.isClickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            if (parent.isClickable && parent.isEnabled && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                 return true
             }
             parent = parent.parent
