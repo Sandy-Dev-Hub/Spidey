@@ -11,10 +11,6 @@ import com.spidey.assistant.actions.BackgroundAppLauncher
 import com.spidey.assistant.actions.OpenAppAction
 import com.spidey.assistant.actions.PlaySpotifyAction
 import com.spidey.assistant.core.ActionResult
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 /**
  * AppSkill for Spotify.
@@ -45,10 +41,13 @@ class SpotifySkill : AppSkill {
                 val query = action.query.trim()
                 if (query.equals("next", ignoreCase = true) || query.equals("change", ignoreCase = true)) {
                     sendMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_NEXT)
-                    ActionResult.Success(spokenMessage = "Skipping to the next song on Spotify.")
+                    ActionResult.Success(spokenMessage = "Skipping to the next song boss.")
                 } else if (query.isBlank() || query.equals("resume", ignoreCase = true) || query.equals("play", ignoreCase = true)) {
                     sendMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_PLAY)
-                    ActionResult.Success(spokenMessage = "Resuming playback on Spotify.")
+                    ActionResult.Success(spokenMessage = "Resuming Spotify playback boss.")
+                } else if (query.equals("pause", ignoreCase = true) || query.equals("stop", ignoreCase = true)) {
+                    sendMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_PAUSE)
+                    ActionResult.Success(spokenMessage = "Spotify playback paused boss.")
                 } else {
                     val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
                         setPackage(packageName)
@@ -64,26 +63,15 @@ class SpotifySkill : AppSkill {
                     }
                     val launched = BackgroundAppLauncher.launch(context, intent)
                     if (launched) {
-                        // Deliver immediate and delayed play events so Spotify transitions to active playback
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            kotlinx.coroutines.delay(600)
-                            sendMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_PLAY)
-                            kotlinx.coroutines.delay(600)
-                            sendMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_PLAY)
-                        }
-                        ActionResult.Success(spokenMessage = "Playing $query on Spotify.")
+                        ActionResult.Success(spokenMessage = "Opening $query on Spotify boss.")
                     } else {
                         val uriIntent = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:${Uri.encode(query)}")).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         }
                         if (BackgroundAppLauncher.launch(context, uriIntent)) {
-                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                kotlinx.coroutines.delay(800)
-                                sendMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_PLAY)
-                            }
-                            ActionResult.Success(spokenMessage = "Playing $query on Spotify.")
+                            ActionResult.Success(spokenMessage = "Opening $query on Spotify boss.")
                         } else {
-                            ActionResult.Failure("Could not start Spotify playback.", "Failed to launch Spotify intent")
+                            ActionResult.Failure("Could not open Spotify for $query boss.", "Failed to launch Spotify intent")
                         }
                     }
                 }

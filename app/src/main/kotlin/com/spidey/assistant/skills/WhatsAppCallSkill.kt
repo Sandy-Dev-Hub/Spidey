@@ -28,7 +28,7 @@ class WhatsAppCallSkill(
             is WhatsAppCallAction -> {
                 val query = action.contactQuery.trim()
                 if (query.isBlank()) {
-                    return ActionResult.Failure("Who would you like to call on WhatsApp?", "Blank contact query")
+                    return ActionResult.Failure("Who would you like to call on WhatsApp boss?", "Blank contact query")
                 }
 
                 val isRawNumber = query.all { it.isDigit() || it == '+' || it == ' ' || it == '-' } && query.length >= 7
@@ -46,7 +46,7 @@ class WhatsAppCallSkill(
                         is ContactResolution.Ambiguous -> {
                             val names = res.candidates.map { it.displayName }
                             return ActionResult.NeedsClarification(
-                                question = "I found ${names.size} contacts on WhatsApp: ${names.joinToString(", ")}. Which one?",
+                                question = "I found ${names.size} contacts on WhatsApp: ${names.joinToString(", ")}. Which one boss?",
                                 candidates = names
                             )
                         }
@@ -71,7 +71,7 @@ class WhatsAppCallSkill(
                     }
                     val launched = BackgroundAppLauncher.launch(context, directCallIntent)
                     if (launched) {
-                        return ActionResult.Success(spokenMessage = "Calling $resolvedName on WhatsApp.")
+                        return ActionResult.Success(spokenMessage = "Opening WhatsApp call for $resolvedName boss. Please tap the call button to connect.")
                     }
                 }
 
@@ -85,18 +85,18 @@ class WhatsAppCallSkill(
                     }
                     val launched = BackgroundAppLauncher.launch(context, intent)
                     if (launched) {
-                        ActionResult.Success(spokenMessage = "Opening $resolvedName on WhatsApp boss. Please tap the call button at the top right to start the call.")
+                        ActionResult.Success(spokenMessage = "Opening WhatsApp for $resolvedName boss. Please tap the call button at the top right to start the call.")
                     } else {
-                        ActionResult.Failure("Could not open WhatsApp for $resolvedName.", "Launch failed")
+                        ActionResult.Failure("Could not open WhatsApp for $resolvedName boss.", "Launch failed")
                     }
                 } else {
                     val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
                     if (launchIntent != null) {
                         launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         BackgroundAppLauncher.launch(context, launchIntent)
-                        ActionResult.Success(spokenMessage = "Opening WhatsApp to call $resolvedName.")
+                        ActionResult.Success(spokenMessage = "Opening WhatsApp for $resolvedName boss.")
                     } else {
-                        ActionResult.Failure("WhatsApp is not installed on this device.", "Package not found")
+                        ActionResult.Failure("WhatsApp is not installed on this device boss.", "Package not found")
                     }
                 }
             }
@@ -127,6 +127,57 @@ class WhatsAppCallSkill(
             "vnd.android.cursor.item/vnd.com.whatsapp.voip.call"
         }
         val cr = context.contentResolver
+
+        // 1. First search via RawContactsEntity (bypasses Samsung's Data.CONTENT_URI uploadable filter)
+        try {
+            val entityUri = ContactsContract.RawContactsEntity.CONTENT_URI
+            val projection = arrayOf(
+                ContactsContract.RawContactsEntity.DATA_ID,
+                ContactsContract.Data.MIMETYPE,
+                ContactsContract.RawContacts.CONTACT_ID,
+                ContactsContract.Data.DATA1,
+                ContactsContract.Data.DISPLAY_NAME_PRIMARY
+            )
+            val selection = "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND ${ContactsContract.Data.MIMETYPE} = ?"
+            val selectionArgs = arrayOf("com.whatsapp", mimeType)
+
+            cr.query(entityUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                val dataIdIdx = cursor.getColumnIndex(ContactsContract.RawContactsEntity.DATA_ID)
+                val contactIdIdx = cursor.getColumnIndex(ContactsContract.RawContacts.CONTACT_ID)
+                val data1Idx = cursor.getColumnIndex(ContactsContract.Data.DATA1)
+                val nameIdx = cursor.getColumnIndex(ContactsContract.Data.DISPLAY_NAME_PRIMARY)
+
+                val digits = phoneNumber?.filter { it.isDigit() }
+                val suffix = if (!digits.isNullOrBlank() && digits.length >= 10) digits.takeLast(10) else digits
+
+                while (cursor.moveToNext()) {
+                    val dId = if (dataIdIdx >= 0) cursor.getLong(dataIdIdx) else -1L
+                    if (dId <= 0) continue
+
+                    // A. Match by contactId
+                    if (!contactId.isNullOrBlank() && contactIdIdx >= 0) {
+                        val cId = cursor.getString(contactIdIdx)
+                        if (cId == contactId) return dId
+                    }
+
+                    // B. Match by phone number suffix
+                    if (!suffix.isNullOrBlank() && data1Idx >= 0) {
+                        val d1 = cursor.getString(data1Idx) ?: ""
+                        if (d1.contains(suffix)) return dId
+                    }
+
+                    // C. Match by display name
+                    if (!displayName.isNullOrBlank() && nameIdx >= 0) {
+                        val dName = cursor.getString(nameIdx) ?: ""
+                        if (dName.contains(displayName, ignoreCase = true) || displayName.contains(dName, ignoreCase = true)) {
+                            return dId
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. Standard fallback to ContactsContract.Data.CONTENT_URI
         val projection = arrayOf(ContactsContract.Data._ID, ContactsContract.Data.DATA1, ContactsContract.Data.CONTACT_ID)
 
         // A. Match by contactId if present
