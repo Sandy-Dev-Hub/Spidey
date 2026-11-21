@@ -24,6 +24,18 @@ object FeatureFlags {
     private const val KEY_SESSION_TIMEOUT_MS = "session_timeout_ms"
     private const val DEFAULT_SESSION_TIMEOUT_MS = 30_000L
 
+    // Persona preset: "jarvis" or "bro"
+    private const val KEY_PERSONA_PRESET = "persona_preset"
+    const val PERSONA_JARVIS = "jarvis"
+    const val PERSONA_BRO = "bro"
+
+    // Selected voice profile: "jarvis_british", "jarvis_deep", "jarvis_crisp", "bro_male"
+    private const val KEY_SELECTED_VOICE = "selected_voice"
+    const val VOICE_JARVIS_BRITISH = "jarvis_british"
+    const val VOICE_JARVIS_DEEP = "jarvis_deep"
+    const val VOICE_JARVIS_CRISP = "jarvis_crisp"
+    const val VOICE_BRO_MALE = "bro_male"
+
     private var prefs: SharedPreferences? = null
 
     fun init(context: Context) {
@@ -44,5 +56,15 @@ object FeatureFlags {
     var sessionTimeoutMs: Long
         get() = prefs?.getLong(KEY_SESSION_TIMEOUT_MS, DEFAULT_SESSION_TIMEOUT_MS) ?: DEFAULT_SESSION_TIMEOUT_MS
         set(value) = prefs?.edit { putLong(KEY_SESSION_TIMEOUT_MS, value) } ?: Unit
+
+    /** Active persona preset ("jarvis" or "bro"). Default: "jarvis" */
+    var personaPreset: String
+        get() = prefs?.getString(KEY_PERSONA_PRESET, PERSONA_JARVIS) ?: PERSONA_JARVIS
+        set(value) = prefs?.edit { putString(KEY_PERSONA_PRESET, value) } ?: Unit
+
+    /** Active voice profile. Default: "jarvis_british" */
+    var selectedVoice: String
+        get() = prefs?.getString(KEY_SELECTED_VOICE, VOICE_JARVIS_BRITISH) ?: VOICE_JARVIS_BRITISH
+        set(value) = prefs?.edit { putString(KEY_SELECTED_VOICE, value) } ?: Unit
 }
 

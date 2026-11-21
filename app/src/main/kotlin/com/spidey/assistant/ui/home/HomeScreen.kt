@@ -87,7 +87,8 @@ import java.util.Locale
 fun HomeScreen(
     onNavigateToSpikes: () -> Unit = {},
     onNavigateToAliases: () -> Unit = {},
-    onNavigateToExclusions: () -> Unit = {}
+    onNavigateToExclusions: () -> Unit = {},
+    onNavigateToVoiceAudition: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isServiceRunning by WakeWordService.isServiceRunning.collectAsState()
@@ -203,6 +204,13 @@ fun HomeScreen(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick = onNavigateToVoiceAudition,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("🎙️ Voice & Persona", fontSize = 12.sp)
+                    }
+
                     OutlinedButton(
                         onClick = onNavigateToExclusions,
                         shape = RoundedCornerShape(12.dp)

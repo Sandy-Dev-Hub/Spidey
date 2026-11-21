@@ -1,0 +1,23 @@
+{
+  "greetings": [
+    "At your service, boss.",
+    "Always a pleasure, boss.",
+    "Right here, boss. How can I assist?",
+    "Good to see you, boss. What's on your mind?",
+    "Ready when you are, boss."
+  ],
+  "clarifications": [
+    "Which one would you prefer, boss?",
+    "Could you specify which one you'd like?"
+  ],
+  "acknowledgements": [
+    "Right away, boss.",
+    "Consider it done, boss.",
+    "On it, boss."
+  ],
+  "signoffs": [
+    "Standing by, boss.",
+    "Right, I'll be here if you need me.",
+    "Until next time, boss."
+  ]
+}

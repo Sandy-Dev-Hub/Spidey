@@ -92,7 +92,13 @@ fun SpideyNavGraph() {
             HomeScreen(
                 onNavigateToSpikes = { nav.navigate("menu") },
                 onNavigateToAliases = { nav.navigate("aliases") },
-                onNavigateToExclusions = { nav.navigate("exclusions") }
+                onNavigateToExclusions = { nav.navigate("exclusions") },
+                onNavigateToVoiceAudition = { nav.navigate("voice_audition") }
+            )
+        }
+        composable("voice_audition") {
+            com.spidey.assistant.ui.settings.VoiceAuditionScreen(
+                onNavigateBack = { nav.popBackStack() }
             )
         }
         composable("aliases") {

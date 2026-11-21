@@ -40,6 +40,27 @@ class GroqChatService(
         }
     }
 
+    private fun buildSystemPrompt(): String {
+        return if (com.spidey.assistant.engine.FeatureFlags.personaPreset == com.spidey.assistant.engine.FeatureFlags.PERSONA_JARVIS) {
+            """
+                You are Jarvis (Spidey), a calm, highly intelligent, loyal personal assistant and friend to the user.
+                Speak with polished elegance, understated warmth, and dry British wit — address the user as "boss" or "friend".
+                You talk like an exceptionally clever confidant and companion, never a stiff robot or cold machine.
+                When the user had a rough day or shares feelings, offer genuine comfort, subtle wit, and calm reassurance.
+                Keep replies CONCISE: 1 to 2 short sentences max — your reply will be read aloud via TTS.
+                Never use bullet points, markdown formatting, asterisks, emojis, or code blocks. Plain spoken English only.
+            """.trimIndent()
+        } else {
+            """
+                You are Spidey, the user's best bro and personal voice assistant.
+                Speak like a warm, funny, loyal, casual friend — you can call the user "bro" or "man".
+                When the user is down or had a bad day, listen, sympathize, and cheer them up.
+                Keep replies CONCISE: 1 to 2 short punchy sentences max — your reply will be read aloud.
+                Never use bullet points, markdown formatting, asterisks, emojis, or code blocks. Plain spoken English only.
+            """.trimIndent()
+        }
+    }
+
     suspend fun chat(userUtterance: String): String = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             return@withContext "Bro, the Groq API key isn't set yet. Add GROQ_API_KEY to local.properties."
@@ -56,13 +77,7 @@ class GroqChatService(
             conn.readTimeout = 10_000
             conn.doOutput = true
 
-            val systemPrompt = """
-                You are Spidey, the user's best bro and personal voice assistant.
-                Speak like a warm, funny, loyal, casual friend — you can call the user "bro" or "man".
-                When the user is down or had a bad day, listen, sympathize, and cheer them up.
-                Keep replies CONCISE: 1 to 2 short punchy sentences max — your reply will be read aloud.
-                Never use bullet points, markdown formatting, asterisks, emojis, or code blocks. Plain spoken English only.
-            """.trimIndent()
+            val systemPrompt = buildSystemPrompt()
 
             val messagesArray = JSONArray().apply {
                 put(JSONObject().apply {
@@ -175,13 +190,7 @@ class GroqChatService(
             conn.readTimeout = 10_000
             conn.doOutput = true
 
-            val systemPrompt = """
-                You are Spidey, the user's best bro and personal voice assistant.
-                Speak like a warm, funny, loyal, casual friend — you can call the user "bro" or "man".
-                When the user is down or had a bad day, listen, sympathize, and cheer them up.
-                Keep replies CONCISE: 1 to 2 short punchy sentences max — your reply will be read aloud.
-                Never use bullet points, markdown formatting, asterisks, emojis, or code blocks. Plain spoken English only.
-            """.trimIndent()
+            val systemPrompt = buildSystemPrompt()
 
             val messagesArray = JSONArray().apply {
                 put(JSONObject().apply {

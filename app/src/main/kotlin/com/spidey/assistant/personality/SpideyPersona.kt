@@ -1,18 +1,28 @@
 package com.spidey.assistant.personality
 
 import android.content.Context
+import com.spidey.assistant.engine.FeatureFlags
 import org.json.JSONObject
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Persona responses for Spidey voice assistant.
- * Clean, casual English bro style (no Thanglish).
- * Loads lines from `assets/persona_lines.json` with fallback defaults.
- * Guarantees never repeating the same greeting twice in a row.
+ * Supports selectable presets:
+ * - Jarvis: Calm, intelligent, British-butler-style wit, addresses user as "boss".
+ * - Bro: Casual, friendly, direct, addresses user as "bro".
+ *
+ * Guaranteed never to repeat the same greeting twice in a row.
  */
 object SpideyPersona {
 
-    private val defaultGreetings = listOf(
+    private val defaultJarvisGreetings = listOf(
+        "At your service, boss.",
+        "Always a pleasure, boss.",
+        "Right here, boss. How can I assist?",
+        "Good to see you, boss. What's on your mind?",
+        "Ready when you are, boss."
+    )
+
+    private val defaultBroGreetings = listOf(
         "Hey bro, wassup?",
         "Yes boss, tell me!",
         "Haan bro, go ahead!",
@@ -20,12 +30,18 @@ object SpideyPersona {
         "I'm here bro, tell me!"
     )
 
-    private var greetings: List<String> = defaultGreetings
+    private var greetings: List<String> = defaultJarvisGreetings
     private var lastGreetingIndex = -1
 
+    val activePreset: String
+        get() = FeatureFlags.personaPreset
+
+    fun isJarvis(): Boolean = activePreset == FeatureFlags.PERSONA_JARVIS
+
     fun loadFromAssets(context: Context) {
+        val assetFileName = if (isJarvis()) "persona_jarvis.json" else "persona_bro.json"
         try {
-            val jsonStr = context.assets.open("persona_lines.json").bufferedReader().use { it.readText() }
+            val jsonStr = context.assets.open(assetFileName).bufferedReader().use { it.readText() }
             val obj = JSONObject(jsonStr)
             val arr = obj.optJSONArray("greetings")
             if (arr != null && arr.length() > 0) {
@@ -37,8 +53,13 @@ object SpideyPersona {
                 if (list.isNotEmpty()) greetings = list
             }
         } catch (_: Exception) {
-            greetings = defaultGreetings
+            greetings = if (isJarvis()) defaultJarvisGreetings else defaultBroGreetings
         }
+    }
+
+    fun setPreset(context: Context, preset: String) {
+        FeatureFlags.personaPreset = preset
+        loadFromAssets(context)
     }
 
     /**
@@ -47,7 +68,9 @@ object SpideyPersona {
      */
     @Synchronized
     fun randomGreeting(): String {
-        if (greetings.isEmpty()) return "Hey bro, wassup?"
+        if (greetings.isEmpty()) {
+            return if (isJarvis()) "At your service, boss." else "Hey bro, wassup?"
+        }
         if (greetings.size == 1) return greetings[0]
 
         var next = (greetings.indices).random()
@@ -61,31 +84,59 @@ object SpideyPersona {
     fun greeting(): String = randomGreeting()
 
     fun appOpening(appName: String): String {
-        return "Opening $appName for you, bro!"
+        return if (isJarvis()) {
+            "Opening $appName for you now, boss."
+        } else {
+            "Opening $appName for you, bro!"
+        }
     }
 
     fun appUnverified(appName: String): String {
-        return "I sent the request to open $appName, but can't confirm it worked."
+        return if (isJarvis()) {
+            "I sent the request to open $appName, but could not confirm its status, boss."
+        } else {
+            "I sent the request to open $appName, but can't confirm it worked."
+        }
     }
 
     fun appNotFound(appName: String): String {
-        return "Bro, I couldn't find $appName on your phone."
+        return if (isJarvis()) {
+            "I couldn't locate $appName on your device, boss."
+        } else {
+            "Bro, I couldn't find $appName on your phone."
+        }
     }
 
     fun timeResponse(timeString: String): String {
-        return "The time is $timeString, bro!"
+        return if (isJarvis()) {
+            "The time is $timeString, boss."
+        } else {
+            "The time is $timeString, bro!"
+        }
     }
 
     fun dateResponse(dateString: String): String {
-        return "Today is $dateString, bro!"
+        return if (isJarvis()) {
+            "Today is $dateString, boss."
+        } else {
+            "Today is $dateString, bro!"
+        }
     }
 
     fun stopResponse(): String {
-        return "Catch you later bro, going to sleep!"
+        return if (isJarvis()) {
+            "Standing by, boss."
+        } else {
+            "Catch you later bro, going to sleep!"
+        }
     }
 
     fun playingSong(query: String, ordinal: String? = null): String {
         val target = if (!ordinal.isNullOrBlank()) "the $ordinal video" else query
-        return "Playing $target on YouTube, enjoy bro!"
+        return if (isJarvis()) {
+            "Playing $target on YouTube for you now, boss."
+        } else {
+            "Playing $target on YouTube, enjoy bro!"
+        }
     }
 }

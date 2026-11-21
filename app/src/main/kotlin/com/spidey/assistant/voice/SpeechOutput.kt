@@ -25,43 +25,9 @@ class SpeechOutput(
     init {
         tts = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                // Use standard English
-                val result = tts?.setLanguage(Locale.US)
-                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    tts?.language = Locale.ENGLISH
-                }
+                // Apply active voice profile from FeatureFlags (defaults to British Jarvis)
+                applyVoiceProfile(com.spidey.assistant.engine.FeatureFlags.selectedVoice)
 
-                // Substantially lower pitch to 0.70f for a definite, unmistakably deep male voice
-                tts?.setPitch(0.70f)
-                tts?.setSpeechRate(1.0f)
-
-                try {
-                    val voices = tts?.voices
-                    if (voices != null) {
-                        for (v in voices) {
-                            Log.d("SpeechOutput", "TTS voice available: name=${v.name}, locale=${v.locale}, isNetwork=${v.isNetworkConnectionRequired}")
-                        }
-
-                        // Look for Google TTS male voices specifically
-                        val preferredMale = voices.firstOrNull { v ->
-                            val n = v.name.lowercase()
-                            (n.contains("en-us-x-sfg") || n.contains("en-us-x-iom") || n.contains("en-us-x-iol") ||
-                             n.contains("en-in-x-c") || n.contains("en-in-x-d") || n.contains("en-gb-x-rjs") ||
-                             n.contains("male") || n.contains("man")) &&
-                            !n.contains("female") && !n.contains("woman")
-                        } ?: voices.firstOrNull { v ->
-                            val n = v.name.lowercase()
-                            !n.contains("female") && !n.contains("woman") && (v.locale.language == "en")
-                        }
-
-                        if (preferredMale != null) {
-                            tts?.voice = preferredMale
-                            Log.i("SpeechOutput", "Active TTS voice selected: ${preferredMale.name}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w("SpeechOutput", "Voice selection exception: ${e.message}")
-                }
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
 
@@ -113,6 +79,8 @@ class SpeechOutput(
             return
         }
 
+        applyVoiceProfile(com.spidey.assistant.engine.FeatureFlags.selectedVoice)
+
         val utteranceId = UUID.randomUUID().toString()
         pendingCallbacks[utteranceId] = onDone
 
@@ -127,6 +95,10 @@ class SpeechOutput(
         if (!isReady || currentTts == null) {
             if (isLast) onDone?.invoke()
             return
+        }
+
+        if (isFirst) {
+            applyVoiceProfile(com.spidey.assistant.engine.FeatureFlags.selectedVoice)
         }
 
         if (chunk.isBlank()) {
@@ -159,6 +131,58 @@ class SpeechOutput(
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
         }
         currentTts.speak(chunk, queueMode, params, utteranceId)
+    }
+
+    fun applyVoiceProfile(profileName: String) {
+        val engine = tts ?: return
+        when (profileName) {
+            com.spidey.assistant.engine.FeatureFlags.VOICE_JARVIS_BRITISH -> {
+                engine.language = Locale.UK
+                engine.setPitch(0.92f)
+                engine.setSpeechRate(1.02f)
+                selectBestVoice(listOf("en-gb-x-rjs-local", "en-gb-x-rjs-network", "en-gb-x-rjs", "en-gb"))
+            }
+            com.spidey.assistant.engine.FeatureFlags.VOICE_JARVIS_DEEP -> {
+                engine.language = Locale.UK
+                engine.setPitch(0.85f)
+                engine.setSpeechRate(0.98f)
+                selectBestVoice(listOf("en-gb-x-gbd-local", "en-gb-x-gbd-network", "en-gb-x-gbd", "en-gb"))
+            }
+            com.spidey.assistant.engine.FeatureFlags.VOICE_JARVIS_CRISP -> {
+                engine.language = Locale.UK
+                engine.setPitch(0.95f)
+                engine.setSpeechRate(1.05f)
+                selectBestVoice(listOf("en-gb-x-gbc-local", "en-gb-x-gbc-network", "en-gb-x-gbc", "en-gb"))
+            }
+            com.spidey.assistant.engine.FeatureFlags.VOICE_BRO_MALE -> {
+                engine.language = Locale.US
+                engine.setPitch(0.70f)
+                engine.setSpeechRate(1.00f)
+                selectBestVoice(listOf("en-us-x-sfg-local", "en-in-x-enc-local", "en-us-x-sfg", "en-us"))
+            }
+            else -> {
+                engine.language = Locale.UK
+                engine.setPitch(0.92f)
+                engine.setSpeechRate(1.02f)
+                selectBestVoice(listOf("en-gb-x-rjs-local", "en-gb-x-rjs-network", "en-gb-x-rjs", "en-gb"))
+            }
+        }
+    }
+
+    private fun selectBestVoice(candidateNames: List<String>) {
+        try {
+            val voices = tts?.voices ?: return
+            for (pattern in candidateNames) {
+                val match = voices.firstOrNull { it.name.contains(pattern, ignoreCase = true) }
+                if (match != null) {
+                    tts?.voice = match
+                    Log.i("SpeechOutput", "Active TTS voice selected: ${match.name}")
+                    return
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("SpeechOutput", "Voice selection exception: ${e.message}")
+        }
     }
 
     fun stop() {
