@@ -62,9 +62,9 @@ object FeatureFlags {
         get() = prefs?.getString(KEY_PERSONA_PRESET, PERSONA_JARVIS) ?: PERSONA_JARVIS
         set(value) = prefs?.edit { putString(KEY_PERSONA_PRESET, value) } ?: Unit
 
-    /** Active voice profile. Default: "jarvis_british" */
+    /** Active voice profile. Default: "jarvis_deep" */
     var selectedVoice: String
-        get() = prefs?.getString(KEY_SELECTED_VOICE, VOICE_JARVIS_BRITISH) ?: VOICE_JARVIS_BRITISH
+        get() = prefs?.getString(KEY_SELECTED_VOICE, VOICE_JARVIS_DEEP) ?: VOICE_JARVIS_DEEP
         set(value) = prefs?.edit { putString(KEY_SELECTED_VOICE, value) } ?: Unit
 }
 

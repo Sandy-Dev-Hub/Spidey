@@ -69,6 +69,8 @@ class SpeechOutput(
 
     private fun sanitizeForSpeech(text: String): String {
         return text
+            .replace(Regex("['\"`]"), "")
+            .replace(Regex("[:;]"), ",")
             .replace(Regex(",\\s*(boss|bro|friend)", RegexOption.IGNORE_CASE), " $1")
             .replace(Regex("\\b(boss|bro|friend),", RegexOption.IGNORE_CASE), "$1")
             .replace(Regex("\\s+"), " ")

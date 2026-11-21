@@ -202,13 +202,13 @@ class ConversationManager(
                     LatencyTracer.mark(LatencyTracer.Phase.INTENT_DECIDED)
                     executeAction(action)
                 } else {
-                    if (isSessionActive && baseCandidates.isNotEmpty()) {
+                    if (baseCandidates.isNotEmpty()) {
                         activeClarificationCandidates = baseCandidates
                     }
                     speakResponse(
                         text = "I didn't understand that.",
                         andThen = {
-                            if (isSessionActive) {
+                            if (isSessionActive || baseCandidates.isNotEmpty()) {
                                 enterFollowUpListening()
                             } else {
                                 returnToSleeping()
@@ -227,6 +227,12 @@ class ConversationManager(
         scope.launch {
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
+                if (activeClarificationCandidates.isNotEmpty() && emptySpeechAttempts == 0) {
+                    emptySpeechAttempts++
+                    _state.value = AssistantState.LISTENING
+                    onStartSpeechListeningRequested()
+                    return@withLock
+                }
                 if (isSessionActive) {
                     // Turn timed out without speech; be subtle and wait on wake word while session remains active
                     returnToSleeping(keepSession = true)
@@ -246,6 +252,13 @@ class ConversationManager(
                 if (_state.value != AssistantState.LISTENING) return@withLock
 
                 val isTransientOrSilence = errorCode in setOf(1, 2, 3, 5, 6, 7, 8, 11)
+
+                if (activeClarificationCandidates.isNotEmpty() && isTransientOrSilence && emptySpeechAttempts == 0) {
+                    emptySpeechAttempts++
+                    _state.value = AssistantState.LISTENING
+                    onStartSpeechListeningRequested()
+                    return@withLock
+                }
 
                 if (isSessionActive) {
                     // Turn encountered silence or error in follow-up mode; be subtle and wait on wake word while session remains active

@@ -96,15 +96,31 @@ class SendMessageHandler(
             }
         }
 
-        val uri = if (!cleanNumber.isNullOrBlank()) {
-            Uri.parse("https://api.whatsapp.com/send?phone=$cleanNumber&text=${Uri.encode(body)}")
-        } else {
-            Uri.parse("https://api.whatsapp.com/send?text=${Uri.encode(body)}")
+        var intlNumber = cleanNumber ?: ""
+        if (intlNumber.isNotBlank()) {
+            intlNumber = intlNumber.replace(Regex("[^0-9]"), "")
+            if (intlNumber.startsWith("0") && intlNumber.length == 11) {
+                intlNumber = intlNumber.removePrefix("0")
+            }
+            if (intlNumber.length == 10 && !intlNumber.startsWith("91")) {
+                intlNumber = "91$intlNumber"
+            }
         }
 
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            setPackage("com.whatsapp")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        val intent = if (intlNumber.isNotBlank()) {
+            Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                setPackage("com.whatsapp")
+                putExtra(Intent.EXTRA_TEXT, body)
+                putExtra("jid", "$intlNumber@s.whatsapp.net")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        } else {
+            val uri = Uri.parse("https://api.whatsapp.com/send?text=${Uri.encode(body)}")
+            Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage("com.whatsapp")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
         }
 
         val launched = BackgroundAppLauncher.launch(context, intent)
