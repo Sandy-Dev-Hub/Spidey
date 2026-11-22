@@ -87,7 +87,7 @@ class SendMessageHandler(
 
                 // Inject body directly into Gmail compose box via Accessibility
                 if (body.isNotBlank() && SpideyAccessibilityService.isAvailable()) {
-                    delay(300)
+                    delay(500)
                     SpideyAccessibilityService.instance?.setGmailBody(body)
                 }
             }
