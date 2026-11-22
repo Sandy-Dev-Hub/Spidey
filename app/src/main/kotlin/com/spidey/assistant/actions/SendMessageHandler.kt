@@ -46,18 +46,6 @@ class SendMessageHandler(
         }
 
         if (body.isBlank()) {
-            // Open Gmail Compose immediately so user sees mail open fastly!
-            if (platform == MessagePlatform.EMAIL && recipient.isNotBlank()) {
-                val email = cleanEmail(recipient)
-                val mailtoUri = Uri.parse("mailto:$email")
-                val preOpenIntent = Intent(Intent.ACTION_SENDTO, mailtoUri).apply {
-                    setPackage("com.google.android.gm")
-                    putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                }
-                BackgroundAppLauncher.launch(context, preOpenIntent)
-            }
-
             val q = if (platform == MessagePlatform.EMAIL) {
                 "What is the message content boss?"
             } else {
@@ -71,31 +59,24 @@ class SendMessageHandler(
 
         // Must confirm before sending per safety rules
         if (!action.isConfirmed) {
-            // Update Gmail Compose with the body so user sees the draft in Gmail!
+            // Open Gmail Compose with recipient and body populated!
             if (platform == MessagePlatform.EMAIL && recipient.isNotBlank()) {
                 val email = cleanEmail(recipient)
-                var setDirectly = false
-                if (body.isNotBlank() && SpideyAccessibilityService.isAvailable()) {
-                    setDirectly = SpideyAccessibilityService.instance?.setGmailBody(body, timeoutMs = 2000L) == true
+                val mailSubject = action.subject.ifBlank { "" }
+                val encodedBody = Uri.encode(body)
+                val uriString = if (mailSubject.isNotBlank()) {
+                    "mailto:$email?subject=${Uri.encode(mailSubject)}&body=$encodedBody"
+                } else {
+                    "mailto:$email?body=$encodedBody"
                 }
-                if (!setDirectly) {
-                    val mailSubject = action.subject.ifBlank { "Message from Spidey" }
-                    val mailtoUri = Uri.parse("mailto:$email?subject=${Uri.encode(mailSubject)}&body=${Uri.encode(body)}")
-                    val previewIntent = Intent(Intent.ACTION_SENDTO, mailtoUri).apply {
-                        setPackage("com.google.android.gm")
-                        putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
-                        putExtra(Intent.EXTRA_SUBJECT, mailSubject)
-                        putExtra(Intent.EXTRA_TEXT, body)
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    }
-                    BackgroundAppLauncher.launch(context, previewIntent)
-
-                    // Inject body directly into Gmail compose box via Accessibility
-                    if (body.isNotBlank() && SpideyAccessibilityService.isAvailable()) {
-                        delay(600)
-                        SpideyAccessibilityService.instance?.setGmailBody(body, timeoutMs = 2500L)
-                    }
+                val previewIntent = Intent(Intent.ACTION_SENDTO, Uri.parse(uriString)).apply {
+                    setPackage("com.google.android.gm")
+                    putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
+                    if (mailSubject.isNotBlank()) putExtra(Intent.EXTRA_SUBJECT, mailSubject)
+                    putExtra(Intent.EXTRA_TEXT, body)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_CLEAR_TASK
                 }
+                BackgroundAppLauncher.launch(context, previewIntent)
             }
 
             val preview = if (platform == MessagePlatform.EMAIL) {
@@ -199,27 +180,28 @@ class SendMessageHandler(
     private suspend fun sendEmail(recipient: String, body: String, subject: String): ActionResult {
         val email = cleanEmail(recipient)
 
-        // If Gmail Compose is already open and accessibility is active, click send immediately!
+        // If Gmail Compose is already open with the body and accessibility is active, click send immediately!
         if (SpideyAccessibilityService.isAvailable()) {
-            if (body.isNotBlank()) {
-                SpideyAccessibilityService.instance?.setGmailBody(body, timeoutMs = 1500L)
-            }
-            delay(300)
-            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 5000L) == true
+            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 4000L) == true
             if (clicked) {
                 return ActionResult.Success(spokenMessage = "Email sent to $email boss.")
             }
         }
 
         // Fallback: launch intent if Gmail was closed or click didn't find button
-        val mailSubject = subject.ifBlank { "Message from Spidey" }
-        val mailtoUri = Uri.parse("mailto:$email?subject=${Uri.encode(mailSubject)}&body=${Uri.encode(body)}")
-        val emailIntent = Intent(Intent.ACTION_SENDTO, mailtoUri).apply {
+        val mailSubject = subject.ifBlank { "" }
+        val encodedBody = Uri.encode(body)
+        val uriString = if (mailSubject.isNotBlank()) {
+            "mailto:$email?subject=${Uri.encode(mailSubject)}&body=$encodedBody"
+        } else {
+            "mailto:$email?body=$encodedBody"
+        }
+        val emailIntent = Intent(Intent.ACTION_SENDTO, Uri.parse(uriString)).apply {
             setPackage("com.google.android.gm")
             putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
-            putExtra(Intent.EXTRA_SUBJECT, mailSubject)
+            if (mailSubject.isNotBlank()) putExtra(Intent.EXTRA_SUBJECT, mailSubject)
             putExtra(Intent.EXTRA_TEXT, body)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
 
         val launched = BackgroundAppLauncher.launch(context, emailIntent)
@@ -228,19 +210,14 @@ class SendMessageHandler(
         }
 
         if (SpideyAccessibilityService.isAvailable()) {
-            delay(800)
-            if (body.isNotBlank()) {
-                SpideyAccessibilityService.instance?.setGmailBody(body, timeoutMs = 2000L)
+            delay(1000)
+            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 4000L) == true
+            if (clicked) {
+                return ActionResult.Success(spokenMessage = "Email sent to $email boss.")
             }
-            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 5000L) == true
-            return if (clicked) {
-                ActionResult.Success(spokenMessage = "Email sent to $email boss.")
-            } else {
-                ActionResult.Success(spokenMessage = "I prepared your email for $email boss. Please tap Send.")
-            }
-        } else {
-            return ActionResult.Success(spokenMessage = "I prepared your email for $email boss. Please tap Send to deliver it.")
         }
+
+        return ActionResult.Success(spokenMessage = "I prepared your email for $email boss. Please tap Send.")
     }
 
     private fun cleanEmail(raw: String): String {
