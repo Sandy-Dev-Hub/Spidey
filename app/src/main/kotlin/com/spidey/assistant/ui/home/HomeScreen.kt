@@ -88,7 +88,8 @@ fun HomeScreen(
     onNavigateToSpikes: () -> Unit = {},
     onNavigateToAliases: () -> Unit = {},
     onNavigateToExclusions: () -> Unit = {},
-    onNavigateToVoiceAudition: () -> Unit = {}
+    onNavigateToVoiceAudition: () -> Unit = {},
+    onNavigateToChecklist: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isServiceRunning by WakeWordService.isServiceRunning.collectAsState()
@@ -234,6 +235,28 @@ fun HomeScreen(
                         Text("Spikes", fontSize = 12.sp)
                     }
                 }
+            }
+
+            // Samsung One UI 7 Background Health Checklist
+            OutlinedButton(
+                onClick = onNavigateToChecklist,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xFF1E293B)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Security,
+                    contentDescription = null,
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Samsung One UI 7 Health & Reliability Checklist",
+                    fontSize = 13.sp,
+                    color = Color(0xFFF1F5F9),
+                    fontWeight = FontWeight.Medium
+                )
             }
 
             // ── Hero State Visualizer ───────────────────────────────

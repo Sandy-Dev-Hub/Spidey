@@ -93,7 +93,13 @@ fun SpideyNavGraph() {
                 onNavigateToSpikes = { nav.navigate("menu") },
                 onNavigateToAliases = { nav.navigate("aliases") },
                 onNavigateToExclusions = { nav.navigate("exclusions") },
-                onNavigateToVoiceAudition = { nav.navigate("voice_audition") }
+                onNavigateToVoiceAudition = { nav.navigate("voice_audition") },
+                onNavigateToChecklist = { nav.navigate("checklist") }
+            )
+        }
+        composable("checklist") {
+            com.spidey.assistant.ui.settings.SamsungChecklistScreen(
+                onNavigateBack = { nav.popBackStack() }
             )
         }
         composable("voice_audition") {

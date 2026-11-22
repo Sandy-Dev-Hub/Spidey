@@ -12,8 +12,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import kotlinx.coroutines.isActive
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -80,11 +83,16 @@ class WakeWordService : Service() {
         }
     }
 
+    private var audioDeviceCallback: AudioDeviceCallback? = null
+
     override fun onCreate() {
         super.onCreate()
         SpikeLogger.log("SPIDEY", "Creating WakeWordService (Android 15 Foreground Service)")
         createNotificationChannel()
         acquireWakeLock()
+
+        com.spidey.assistant.util.DiagnosticsTracker.init(this)
+        com.spidey.assistant.util.DiagnosticsTracker.recordServiceStart()
 
         // Register for system unlock broadcast
         try {
@@ -107,6 +115,53 @@ class WakeWordService : Service() {
         val audioManager = getSystemService(AudioManager::class.java)
         var audioFocusRequest: AudioFocusRequest? = null
 
+        val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    SpikeLogger.log("SPIDEY", "Audio focus lost ($focusChange) - pausing wake word")
+                    com.spidey.assistant.util.DiagnosticsTracker.recordFocusInterruption()
+                    wakeWordEngine.pause()
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    SpikeLogger.log("SPIDEY", "Audio focus regained - re-arming wake word")
+                    wakeWordEngine.resume()
+                }
+            }
+        }
+
+        // Modern AudioDeviceCallback (wired headset, BT SCO, BT A2DP, USB mic connect/disconnect)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            audioDeviceCallback = object : AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                    SpikeLogger.log("SPIDEY", "Audio devices connected (headset/BT) - re-evaluating mic input")
+                    serviceScope.launch {
+                        wakeWordEngine.pause()
+                        kotlinx.coroutines.delay(250)
+                        wakeWordEngine.resume()
+                    }
+                }
+
+                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                    SpikeLogger.log("SPIDEY", "Audio devices removed - falling back to phone mic")
+                    serviceScope.launch {
+                        wakeWordEngine.pause()
+                        kotlinx.coroutines.delay(250)
+                        wakeWordEngine.resume()
+                    }
+                }
+            }
+            audioManager?.registerAudioDeviceCallback(audioDeviceCallback, null)
+        }
+
+        // Periodic 30s heartbeat loop for reliability tracking
+        serviceScope.launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(30_000L)
+                com.spidey.assistant.util.DiagnosticsTracker.recordHeartbeat(30L)
+            }
+        }
+
         fun requestDuckingAudioFocus() {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -118,13 +173,13 @@ class WakeWordService : Service() {
                                 .build()
                         )
                         .setAcceptsDelayedFocusGain(false)
-                        .setOnAudioFocusChangeListener { /* no-op */ }
+                        .setOnAudioFocusChangeListener(audioFocusChangeListener)
                         .build()
                     audioFocusRequest = req
                     audioManager?.requestAudioFocus(req)
                 } else {
                     @Suppress("DEPRECATION")
-                    audioManager?.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    audioManager?.requestAudioFocus(audioFocusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                 }
             } catch (_: Exception) {}
         }
@@ -408,6 +463,14 @@ class WakeWordService : Service() {
         try {
             unregisterReceiver(userPresentReceiver)
         } catch (_: Exception) {}
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioDeviceCallback != null) {
+            try {
+                val audioManager = getSystemService(AudioManager::class.java)
+                audioManager?.unregisterAudioDeviceCallback(audioDeviceCallback)
+            } catch (_: Exception) {}
+            audioDeviceCallback = null
+        }
 
         releaseWakeLock()
         _isServiceRunning.value = false

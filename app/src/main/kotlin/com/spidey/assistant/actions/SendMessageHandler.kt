@@ -77,6 +77,11 @@ class SendMessageHandler(
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_CLEAR_TASK
                 }
                 BackgroundAppLauncher.launch(context, previewIntent)
+
+                if (SpideyAccessibilityService.isAvailable() && body.isNotBlank()) {
+                    delay(700)
+                    SpideyAccessibilityService.instance?.setGmailBody(body, timeoutMs = 2500L)
+                }
             } else if (platform == MessagePlatform.WHATSAPP && recipient.isNotBlank() && body.isNotBlank()) {
                 val previewNumber = resolveNumber(recipient)
                 val uri = if (previewNumber.isNotBlank()) {
@@ -89,6 +94,11 @@ class SendMessageHandler(
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 }
                 BackgroundAppLauncher.launch(context, previewIntent)
+
+                if (SpideyAccessibilityService.isAvailable()) {
+                    delay(700)
+                    SpideyAccessibilityService.instance?.setWhatsAppBody(body, timeoutMs = 2500L)
+                }
             }
 
             val preview = if (platform == MessagePlatform.EMAIL) {
@@ -224,8 +234,12 @@ class SendMessageHandler(
     private suspend fun sendEmail(recipient: String, body: String, subject: String): ActionResult {
         val email = cleanEmail(recipient)
 
-        // If Gmail Compose is already open with the body and accessibility is active, click send immediately!
+        // If Gmail Compose is already open with the body and accessibility is active, ensure body is set and click send!
         if (SpideyAccessibilityService.isAvailable()) {
+            if (body.isNotBlank()) {
+                SpideyAccessibilityService.instance?.setGmailBody(body, timeoutMs = 2500L)
+                delay(200)
+            }
             val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 4000L) == true
             if (clicked) {
                 return ActionResult.Success(spokenMessage = "Email sent to $email boss.")
@@ -254,7 +268,11 @@ class SendMessageHandler(
         }
 
         if (SpideyAccessibilityService.isAvailable()) {
-            delay(1000)
+            delay(1200)
+            if (body.isNotBlank()) {
+                SpideyAccessibilityService.instance?.setGmailBody(body, timeoutMs = 2500L)
+                delay(200)
+            }
             val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 4000L) == true
             if (clicked) {
                 return ActionResult.Success(spokenMessage = "Email sent to $email boss.")

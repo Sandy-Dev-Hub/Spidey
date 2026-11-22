@@ -118,21 +118,79 @@ class SpideyAccessibilityService : AccessibilityService() {
         }
     }
 
-    suspend fun clickSendInWhatsApp(timeoutMs: Long = 3500L): Boolean {
-        return setWhatsAppBodyAndSend("", timeoutMs)
-    }
+    suspend fun setWhatsAppBody(text: String, timeoutMs: Long = 3000L): Boolean {
+        if (text.isBlank()) return false
 
-    suspend fun setWhatsAppBodyAndSend(text: String, timeoutMs: Long = 4000L): Boolean {
+        try {
+            val cb = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cb?.setPrimaryClip(ClipData.newPlainText("wa_msg", text))
+        } catch (_: Exception) {}
+
         val startTime = System.currentTimeMillis()
-        var textInserted = false
-
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             for (root in getAllRoots()) {
                 val pkg = root.packageName?.toString()?.lowercase() ?: ""
                 if (isPackageBlocklisted(pkg)) continue
                 if (!pkg.contains("whatsapp")) continue
 
-                // 1. If Send button is ALREADY visible (text already in box), click it immediately!
+                val entryNodes = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/entry")
+                for (entry in entryNodes) {
+                    val cur = entry.text?.toString() ?: ""
+                    if (cur == text) {
+                        Log.i(TAG, "WhatsApp body already matches target text")
+                        return true
+                    }
+
+                    val args = Bundle().apply {
+                        putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+                    }
+
+                    if (entry.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                        Log.i(TAG, "setWhatsAppBody: set text directly via ACTION_SET_TEXT")
+                        return true
+                    }
+
+                    // Focus and paste
+                    clickNodeOrTap(entry)
+                    delay(150)
+                    val focused = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: entry
+                    if (focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) ||
+                        focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                        Log.i(TAG, "setWhatsAppBody: set/pasted text after focus")
+                        return true
+                    }
+                }
+            }
+            delay(150)
+        }
+
+        // Fallback: physical tap on WhatsApp message box [158, 2245][491, 2328] -> center (324, 2286)
+        Log.i(TAG, "setWhatsAppBody: fallback physical tap at (324, 2286)")
+        tapCoordinates(324f, 2286f)
+        delay(200)
+        val activeFocus = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (activeFocus != null) {
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            if (activeFocus.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) ||
+                activeFocus.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                Log.i(TAG, "setWhatsAppBody: set/pasted text on activeFocus after physical tap")
+                return true
+            }
+        }
+
+        return false
+    }
+
+    suspend fun clickSendInWhatsApp(timeoutMs: Long = 3500L): Boolean {
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            for (root in getAllRoots()) {
+                val pkg = root.packageName?.toString()?.lowercase() ?: ""
+                if (isPackageBlocklisted(pkg)) continue
+                if (!pkg.contains("whatsapp")) continue
+
                 try {
                     val sendNodes = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/send")
                     for (node in sendNodes) {
@@ -143,36 +201,6 @@ class SpideyAccessibilityService : AccessibilityService() {
                     }
                 } catch (_: Exception) {}
 
-                // 2. If text was specified and not yet inserted, find WhatsApp message entry box
-                if (!textInserted && text.isNotBlank()) {
-                    try {
-                        val entryNodes = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/entry")
-                        for (entry in entryNodes) {
-                            val cur = entry.text?.toString() ?: ""
-                            if (cur.isBlank()) {
-                                try {
-                                    val cb = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                    cb?.setPrimaryClip(ClipData.newPlainText("wa_msg", text))
-                                } catch (_: Exception) {}
-
-                                val args = Bundle().apply {
-                                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-                                }
-                                if (entry.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) ||
-                                    entry.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                                    Log.i(TAG, "Inserted message text into WhatsApp entry field")
-                                    textInserted = true
-                                    break
-                                }
-                            } else {
-                                textInserted = true
-                                break
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                // 3. Try WhatsApp send button by content description or text
                 try {
                     val descNodes = root.findAccessibilityNodeInfosByText("Send")
                     for (node in descNodes) {
@@ -187,7 +215,6 @@ class SpideyAccessibilityService : AccessibilityService() {
                     }
                 } catch (_: Exception) {}
 
-                // 4. Recursive search
                 if (findAndClickSendNode(root)) {
                     return true
                 }
@@ -195,18 +222,23 @@ class SpideyAccessibilityService : AccessibilityService() {
             delay(150)
         }
 
-        // 5. Physical tap fallback on WhatsApp send button coordinates
-        // (990, 2290) when keyboard is hidden, (990, 1330) when keyboard is open
-        Log.i(TAG, "setWhatsAppBodyAndSend: attempting gesture tap at WhatsApp send coordinates (990, 2290)")
-        if (tapCoordinates(990f, 2290f)) {
-            return true
-        }
-        if (tapCoordinates(990f, 1330f)) {
-            return true
-        }
+        // Physical tap fallback on WhatsApp send button coordinates:
+        // When keyboard is open: (986, 1317)
+        // When keyboard is closed: (986, 2283)
+        Log.i(TAG, "clickSendInWhatsApp: attempting gesture taps at Send coordinates")
+        if (tapCoordinates(986f, 1317f)) return true
+        if (tapCoordinates(986f, 2283f)) return true
 
-        Log.w(TAG, "setWhatsAppBodyAndSend timed out after ${timeoutMs}ms")
+        Log.w(TAG, "clickSendInWhatsApp timed out after ${timeoutMs}ms")
         return false
+    }
+
+    suspend fun setWhatsAppBodyAndSend(text: String, timeoutMs: Long = 4000L): Boolean {
+        if (text.isNotBlank()) {
+            setWhatsAppBody(text, timeoutMs = 2500L)
+            delay(200)
+        }
+        return clickSendInWhatsApp(timeoutMs = 2500L)
     }
 
     suspend fun clickSendInGmail(timeoutMs: Long = 3500L): Boolean {
@@ -274,7 +306,7 @@ class SpideyAccessibilityService : AccessibilityService() {
         return false
     }
 
-    suspend fun setGmailBody(text: String, timeoutMs: Long = 2500L): Boolean {
+    suspend fun setGmailBody(text: String, timeoutMs: Long = 3000L): Boolean {
         if (text.isBlank()) return false
 
         // 1. Copy text to system clipboard
@@ -290,6 +322,7 @@ class SpideyAccessibilityService : AccessibilityService() {
             for (root in getAllRoots()) {
                 val pkg = root.packageName?.toString()?.lowercase() ?: ""
                 if (isPackageBlocklisted(pkg)) continue
+                if (!pkg.contains("com.google.android.gm")) continue
                 if (findAndSetBodyNode(root, text)) {
                     Log.i(TAG, "Successfully set Gmail body via accessibility node")
                     return true
@@ -298,37 +331,38 @@ class SpideyAccessibilityService : AccessibilityService() {
             delay(150)
         }
 
-        // 2. Guaranteed Physical Focus Tap + Paste Fallback:
-        // In Gmail Compose, the body editor is located at center (540, 795)
+        // 2. Guaranteed physical tap at Gmail compose body center (540, 795)
         Log.i(TAG, "setGmailBody: attempting physical tap at body coordinates (540, 795)")
         tapCoordinates(540f, 795f)
         delay(250)
 
-        // Try pasting into the newly focused node
         for (root in getAllRoots()) {
             val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             if (focused != null) {
                 val args = Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
                 }
-                if (focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-                    Log.i(TAG, "setGmailBody: set text via ACTION_SET_TEXT after focus tap")
-                    return true
-                }
-                if (focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                    Log.i(TAG, "setGmailBody: pasted text via ACTION_PASTE after focus tap")
+                if (focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) ||
+                    focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                    Log.i(TAG, "setGmailBody: set text via ACTION_SET_TEXT / ACTION_PASTE after tap")
                     return true
                 }
             }
         }
 
         val activeFocus = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        if (activeFocus != null && activeFocus.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-            Log.i(TAG, "setGmailBody: pasted text via activeFocus")
-            return true
+        if (activeFocus != null) {
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            if (activeFocus.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) ||
+                activeFocus.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                Log.i(TAG, "setGmailBody: pasted text via activeFocus")
+                return true
+            }
         }
 
-        return true
+        return false
     }
 
     private suspend fun findAndSetBodyNode(node: AccessibilityNodeInfo, text: String): Boolean {
@@ -339,43 +373,42 @@ class SpideyAccessibilityService : AccessibilityService() {
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
 
-        val isSubject = viewId.contains("subject") || (bounds.bottom > 0 && bounds.bottom <= 721)
+        val isSubject = viewId.contains("subject") || (bounds.bottom in 1..721)
         val isRecipient = viewId.contains("to") || viewId.contains("recipient") || viewId.contains("peoplekit")
 
-        // Target ONLY the editable EditText in the message body area (below Subject, top >= 700)
-        val isBodyEditText = (className.endsWith("EditText") || node.isEditable) &&
-                !isSubject && !isRecipient &&
-                (viewId == "editor" || bounds.top >= 700)
+        // Match the Gmail composer body:
+        // - id is "editor" or ends with ":id/wc_body"
+        // - or it's an editable/focusable area with top in 650..1200
+        val isBodyTarget = !isSubject && !isRecipient && (
+            viewId == "editor" ||
+            viewId.endsWith(":id/wc_body") ||
+            ((className.contains("EditText") || className.contains("WebView")) && bounds.top in 650..1200)
+        )
 
-        if (isBodyEditText && bounds.width() > 0 && bounds.height() > 0) {
-            Log.i(TAG, "Found Gmail body EditText: id=$viewId, bounds=$bounds")
+        if (isBodyTarget && bounds.width() > 100 && bounds.height() > 50) {
+            Log.i(TAG, "Found Gmail body target: id=$viewId, class=$className, bounds=$bounds")
 
-            // 1. Try ACTION_SET_TEXT directly
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
             if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-                Log.i(TAG, "Set text on body node via ACTION_SET_TEXT")
+                Log.i(TAG, "Set text on Gmail body via ACTION_SET_TEXT")
                 return true
             }
 
-            // 2. Try ACTION_PASTE directly
-            if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                Log.i(TAG, "Pasted text directly into body node")
-                return true
-            }
-
-            // 3. Tap the center of the editor, delay 150ms, then paste
-            tapCoordinates(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+            // Tap the body to focus it, then try pasting
+            clickNodeOrTap(node)
             delay(150)
 
-            val focused = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            if (focused != null && focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                Log.i(TAG, "Pasted into focused node after tap")
+            val focused = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: node
+            if (focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) ||
+                focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                Log.i(TAG, "Pasted/set text into Gmail body after focus")
                 return true
             }
+
             if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                Log.i(TAG, "Pasted into body node after tap")
+                Log.i(TAG, "Pasted into Gmail body directly")
                 return true
             }
         }

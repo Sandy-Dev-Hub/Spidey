@@ -84,6 +84,7 @@ class ConversationManager(
      */
     fun onWakeWordDetected(inlineCommand: String? = null) {
         LatencyTracer.mark(LatencyTracer.Phase.WAKE_DETECTED)
+        com.spidey.assistant.util.DiagnosticsTracker.recordWakeDetection()
         scope.launch {
             mutex.withLock {
                 if (_state.value == AssistantState.PROCESSING ||
@@ -224,6 +225,7 @@ class ConversationManager(
      * Called when speech recognition captures no speech or times out.
      */
     fun onSpeechEmpty() {
+        com.spidey.assistant.util.DiagnosticsTracker.recordFalseWake()
         scope.launch {
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
@@ -247,6 +249,7 @@ class ConversationManager(
      * Called when speech recognition encounters an error.
      */
     fun onSpeechError(errorCode: Int, errorMessage: String) {
+        com.spidey.assistant.util.DiagnosticsTracker.recordSpeechError()
         scope.launch {
             mutex.withLock {
                 if (_state.value != AssistantState.LISTENING) return@withLock
