@@ -616,7 +616,7 @@ class IntentEngineTest {
     @Test
     fun testExplicitAppInPhraseRouting() {
         val testCases = listOf(
-            // Spotify phrases (8)
+            // Spotify phrases (12)
             "play believer on spotify" to "believer",
             "search believer on spotify" to "believer",
             "listen to believer on spotify" to "believer",
@@ -624,7 +624,11 @@ class IntentEngineTest {
             "play the song shape of you on spotify" to "shape of you",
             "spotify play counting stars" to "counting stars",
             "play on spotify memories" to "memories",
-            "play taylor swift in spotify" to "taylor swift"
+            "play taylor swift in spotify" to "taylor swift",
+            "open spotify and play aeroplane" to "aeroplane",
+            "open spotify and play aeroplane song from scene" to "aeroplane song from scene",
+            "open spotify and play believer" to "believer",
+            "go to spotify and play starboy" to "starboy"
         )
         for ((phrase, expectedQuery) in testCases) {
             val action = intentEngine.parse(phrase)
@@ -702,7 +706,12 @@ class IntentEngineTest {
             "launch chrome" to "Chrome",
             "open settings" to "Settings",
             "open contacts" to "Contacts",
-            "open calculator" to "Calculator"
+            "open calculator" to "Calculator",
+            "open spotify and play a particular song" to "Spotify",
+            "open spotify and play some music" to "Spotify",
+            "open camera and take a picture" to "Camera",
+            "open settings and check battery" to "Settings",
+            "open instagram and check reels" to "Instagram"
         )
         for ((phrase, expectedAppName) in appPhrases) {
             val action = intentEngine.parse(phrase)

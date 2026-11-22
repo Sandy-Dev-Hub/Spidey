@@ -148,17 +148,39 @@ class IntentEngine(
         }
 
         // 1. Spotify in phrase
-        if (clean.endsWith(" on spotify") || clean.endsWith(" in spotify") || clean.startsWith("play on spotify ") || clean.startsWith("spotify play ")) {
+        val isSpotifyPhrase = clean.endsWith(" on spotify") || clean.endsWith(" in spotify") ||
+                clean.startsWith("play on spotify ") || clean.startsWith("play in spotify ") ||
+                clean.startsWith("search on spotify ") || clean.startsWith("search in spotify ") ||
+                clean.startsWith("spotify play ") || clean.startsWith("spotify search ") ||
+                clean.startsWith("open spotify and ") || clean.startsWith("go to spotify and ") ||
+                clean.startsWith("launch spotify and ") || clean.startsWith("start spotify and ") ||
+                clean.startsWith("open spotify play ") || clean.startsWith("open spotify ") ||
+                clean.startsWith("spotify ")
+
+        if (isSpotifyPhrase) {
             var query = when {
                 clean.endsWith(" on spotify") -> clean.removeSuffix(" on spotify").trim()
                 clean.endsWith(" in spotify") -> clean.removeSuffix(" in spotify").trim()
                 clean.startsWith("play on spotify ") -> clean.removePrefix("play on spotify ").trim()
+                clean.startsWith("play in spotify ") -> clean.removePrefix("play in spotify ").trim()
+                clean.startsWith("search on spotify ") -> clean.removePrefix("search on spotify ").trim()
+                clean.startsWith("search in spotify ") -> clean.removePrefix("search in spotify ").trim()
+                clean.startsWith("open spotify and ") -> clean.removePrefix("open spotify and ").trim()
+                clean.startsWith("go to spotify and ") -> clean.removePrefix("go to spotify and ").trim()
+                clean.startsWith("launch spotify and ") -> clean.removePrefix("launch spotify and ").trim()
+                clean.startsWith("start spotify and ") -> clean.removePrefix("start spotify and ").trim()
+                clean.startsWith("open spotify play ") -> clean.removePrefix("open spotify play ").trim()
+                clean.startsWith("open spotify ") -> clean.removePrefix("open spotify ").trim()
                 clean.startsWith("spotify play ") -> clean.removePrefix("spotify play ").trim()
+                clean.startsWith("spotify search ") -> clean.removePrefix("spotify search ").trim()
+                clean.startsWith("spotify ") -> clean.removePrefix("spotify ").trim()
                 else -> clean
             }
             val stripVerbs = listOf(
-                "play the song ", "play song ", "play a song ", "play ",
-                "search for the song ", "search for song ", "search for ", "search ", "listen to "
+                "search for the song ", "search for song ", "search for ", "search ",
+                "play the song ", "play song ", "play a song ", "play a particular song ", "play particular song ",
+                "play a particular ", "play ", "listen to the song ", "listen to song ", "listen to ",
+                "for the song ", "for song ", "for a song ", "for "
             )
             for (verb in stripVerbs) {
                 if (query.startsWith(verb)) {
@@ -173,22 +195,57 @@ class IntentEngine(
                     break
                 }
             }
-            if (query.isNotBlank() && query != "spotify" && query != "play") {
+            val genericMusic = setOf(
+                "", "spotify", "play", "music", "some music", "a music", "song", "a song", "the song", "some song",
+                "songs", "some songs", "track", "tracks", "particular song", "a particular song", "something", "anything"
+            )
+            if (query in genericMusic) {
+                return OpenAppAction(AllowedApp.SPOTIFY)
+            } else {
                 return PlaySpotifyAction(query = query, isPlayDirectly = true)
             }
         }
 
         // 2. YouTube in phrase
-        if (clean.endsWith(" on youtube") || clean.endsWith(" in youtube") || clean.startsWith("open youtube and ") || clean.startsWith("go to youtube and ")) {
+        val isYouTubePhrase = clean.endsWith(" on youtube") || clean.endsWith(" in youtube") ||
+                clean.startsWith("open youtube and ") || clean.startsWith("go to youtube and ") ||
+                clean.startsWith("launch youtube and ") || clean.startsWith("start youtube and ") ||
+                clean.startsWith("open youtube play ") || clean.startsWith("open youtube ") ||
+                clean.startsWith("play on youtube ") || clean.startsWith("play in youtube ") ||
+                clean.startsWith("search on youtube ") || clean.startsWith("search in youtube ") ||
+                clean.startsWith("youtube play ") || clean.startsWith("youtube search ") ||
+                clean.startsWith("youtube ")
+
+        if (isYouTubePhrase) {
             val isPlay = clean.contains("play")
-            var query = clean.removeSuffix(" on youtube").removeSuffix(" in youtube").trim()
+            var query = when {
+                clean.endsWith(" on youtube") -> clean.removeSuffix(" on youtube").trim()
+                clean.endsWith(" in youtube") -> clean.removeSuffix(" in youtube").trim()
+                clean.startsWith("open youtube and ") -> clean.removePrefix("open youtube and ").trim()
+                clean.startsWith("go to youtube and ") -> clean.removePrefix("go to youtube and ").trim()
+                clean.startsWith("launch youtube and ") -> clean.removePrefix("launch youtube and ").trim()
+                clean.startsWith("start youtube and ") -> clean.removePrefix("start youtube and ").trim()
+                clean.startsWith("open youtube play ") -> clean.removePrefix("open youtube play ").trim()
+                clean.startsWith("open youtube ") -> clean.removePrefix("open youtube ").trim()
+                clean.startsWith("play on youtube ") -> clean.removePrefix("play on youtube ").trim()
+                clean.startsWith("play in youtube ") -> clean.removePrefix("play in youtube ").trim()
+                clean.startsWith("search on youtube ") -> clean.removePrefix("search on youtube ").trim()
+                clean.startsWith("search in youtube ") -> clean.removePrefix("search in youtube ").trim()
+                clean.startsWith("youtube play ") -> clean.removePrefix("youtube play ").trim()
+                clean.startsWith("youtube search ") -> clean.removePrefix("youtube search ").trim()
+                clean.startsWith("youtube ") -> clean.removePrefix("youtube ").trim()
+                else -> clean
+            }
             val stripVerbs = listOf(
                 "open youtube and search for the song ", "open youtube and search for song ",
                 "open youtube and search for ", "open youtube and search ", "open youtube and play song ", "open youtube and play ",
                 "go to youtube and search for the song ", "go to youtube and search for song ",
                 "go to youtube and search for ", "go to youtube and search ", "go to youtube and play song ", "go to youtube and play ",
                 "search for the song ", "search for song ", "search song ", "search for ", "search ",
-                "play the song ", "play song ", "play a song ", "play "
+                "play the song ", "play song ", "play a song ", "play a particular song ", "play particular song ",
+                "play a video ", "play the video ", "play video ", "play ",
+                "watch the video ", "watch video ", "watch ",
+                "for the song ", "for song ", "for a song ", "for the video ", "for video ", "for "
             )
             for (verb in stripVerbs) {
                 if (query.startsWith(verb)) {
@@ -203,15 +260,25 @@ class IntentEngine(
                     break
                 }
             }
-            if (query.isNotBlank() && query != "youtube" && query != "play") {
+            val genericVideo = setOf(
+                "", "youtube", "play", "video", "videos", "some video", "a video", "the video",
+                "something", "anything", "particular video", "a particular video", "song", "songs"
+            )
+            if (query in genericVideo) {
+                return OpenAppAction(AllowedApp.YOUTUBE)
+            } else {
                 return SearchYouTubeAction(query = query, isPlayDirectly = isPlay)
             }
         }
 
         // 3. WhatsApp in phrase
-        if (clean.endsWith(" on whatsapp") || clean.endsWith(" via whatsapp") || clean.endsWith(" in whatsapp") ||
-            clean.startsWith("whatsapp call ") || clean.startsWith("call on whatsapp ") || clean.startsWith("call via whatsapp ")
-        ) {
+        val isWhatsAppPhrase = clean.endsWith(" on whatsapp") || clean.endsWith(" via whatsapp") || clean.endsWith(" in whatsapp") ||
+                clean.startsWith("whatsapp call ") || clean.startsWith("call on whatsapp ") || clean.startsWith("call via whatsapp ") ||
+                clean.startsWith("open whatsapp and call ") || clean.startsWith("open whatsapp and video call ") ||
+                clean.startsWith("go to whatsapp and call ") || clean.startsWith("go to whatsapp and video call ")
+
+        if (isWhatsAppPhrase) {
+            val isVideo = clean.contains("video")
             var target = when {
                 clean.endsWith(" on whatsapp") -> clean.removeSuffix(" on whatsapp").trim()
                 clean.endsWith(" via whatsapp") -> clean.removeSuffix(" via whatsapp").trim()
@@ -219,6 +286,10 @@ class IntentEngine(
                 clean.startsWith("whatsapp call ") -> clean.removePrefix("whatsapp call ").trim()
                 clean.startsWith("call on whatsapp ") -> clean.removePrefix("call on whatsapp ").trim()
                 clean.startsWith("call via whatsapp ") -> clean.removePrefix("call via whatsapp ").trim()
+                clean.startsWith("open whatsapp and call ") -> clean.removePrefix("open whatsapp and call ").trim()
+                clean.startsWith("open whatsapp and video call ") -> clean.removePrefix("open whatsapp and video call ").trim()
+                clean.startsWith("go to whatsapp and call ") -> clean.removePrefix("go to whatsapp and call ").trim()
+                clean.startsWith("go to whatsapp and video call ") -> clean.removePrefix("go to whatsapp and video call ").trim()
                 else -> clean
             }
             val callVerbs = listOf("call ", "voice call ", "video call ", "dial ", "phone ")
@@ -229,7 +300,7 @@ class IntentEngine(
                 }
             }
             if (target.isNotBlank() && target != "whatsapp") {
-                return WhatsAppCallAction(contactQuery = target, isVideo = clean.contains("video"))
+                return WhatsAppCallAction(contactQuery = target, isVideo = isVideo)
             }
         }
 
@@ -265,6 +336,13 @@ class IntentEngine(
         val isYouTubeContext = candidatesContext.contains("context:youtube") || candidatesContext.contains("context:com.google.android.youtube")
         val isWhatsAppContext = candidatesContext.contains("context:whatsapp") || candidatesContext.contains("context:com.whatsapp")
         val contextApp = candidatesContext.firstOrNull { it.startsWith("context:") }?.removePrefix("context:")
+        val normContextApp = when (contextApp?.lowercase()) {
+            "spotify", "com.spotify.music" -> "spotify"
+            "youtube", "com.google.android.youtube" -> "youtube"
+            "whatsapp", "com.whatsapp" -> "whatsapp"
+            "phone", "dialer", "com.samsung.android.dialer" -> "phone"
+            else -> contextApp?.lowercase()
+        }
 
         val changePhrases = listOf(
             "change song", "change the song", "change this song", "next song", "play next song", "next video",
@@ -359,9 +437,9 @@ class IntentEngine(
         }
 
         // 4. Other foreground app context
-        if (contextApp != null && contextApp != "youtube" && contextApp != "spotify" && contextApp != "phone") {
+        if (normContextApp != null && normContextApp != "youtube" && normContextApp != "spotify" && normContextApp != "phone") {
             if (expressesChange || clean.startsWith("play ") || clean.startsWith("play song")) {
-                val appName = contextApp.replaceFirstChar { it.uppercase() }
+                val appName = normContextApp.replaceFirstChar { it.uppercase() }
                 return InAppUnsupportedAction(appName = appName, command = "media playback")
             }
         }
@@ -1180,10 +1258,23 @@ class IntentEngine(
             candidateAppName = candidateAppName.removePrefix("with ").trim()
             candidateAppName = candidateAppName.removeSuffix(" app").removeSuffix(" application").trim()
 
+            // If compound command like "open camera and take picture", extract the leading app candidate
+            var targetApp = candidateAppName
+            if (targetApp.contains(" and ")) {
+                val prefixApp = targetApp.substringBefore(" and ").trim()
+                val matchedPrefix = AllowedApp.entries.firstOrNull {
+                    it.displayName.equals(prefixApp, ignoreCase = true) ||
+                    it.aliases.any { alias -> alias.equals(prefixApp, ignoreCase = true) }
+                }
+                if (matchedPrefix != null) {
+                    targetApp = matchedPrefix.displayName
+                }
+            }
+
             // Check if matches AllowedApp enum
             val matchedAllowed = AllowedApp.entries.firstOrNull {
-                it.displayName.equals(candidateAppName, ignoreCase = true) ||
-                it.aliases.any { alias -> alias.equals(candidateAppName, ignoreCase = true) }
+                it.displayName.equals(targetApp, ignoreCase = true) ||
+                it.aliases.any { alias -> alias.equals(targetApp, ignoreCase = true) }
             }
 
             if (matchedAllowed != null) {
@@ -1193,9 +1284,9 @@ class IntentEngine(
             // Dynamic open for any installed app (Task 3: open any installed app by spoken name)
             val isExplicitOpenCommand = appTriggers.any { clean.startsWith("$it ") }
             if (isExplicitOpenCommand) {
-                val appWords = candidateAppName.split("\\s+".toRegex()).filter { it.isNotBlank() }
-                if (appWords.size <= 4 && !candidateAppName.contains(" and ") && !candidateAppName.contains(" on ") && !candidateAppName.contains(" in ")) {
-                    return OpenAppAction(appName = candidateAppName)
+                val appWords = targetApp.split("\\s+".toRegex()).filter { it.isNotBlank() }
+                if (appWords.size <= 4 && !targetApp.contains(" and ") && !targetApp.contains(" on ") && !targetApp.contains(" in ")) {
+                    return OpenAppAction(appName = targetApp)
                 }
             }
         }
