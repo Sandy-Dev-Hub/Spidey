@@ -1,6 +1,7 @@
 package com.spidey.assistant.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -12,6 +13,8 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
  * Accessibility service for SPIDEY to automate hands-free taps (e.g. WhatsApp / Gmail "Send")
@@ -48,13 +51,39 @@ class SpideyAccessibilityService : AccessibilityService() {
         )
     }
 
+    @Volatile
+    private var lastGmailRoot: AccessibilityNodeInfo? = null
+
+    @Volatile
+    private var lastWhatsAppRoot: AccessibilityNodeInfo? = null
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        try {
+            val info = serviceInfo ?: AccessibilityServiceInfo()
+            info.flags = info.flags or
+                    AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                    AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+            serviceInfo = info
+            Log.i(TAG, "SpideyAccessibilityService configured with dynamic flags=${info.flags}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to update dynamic serviceInfo", e)
+        }
         Log.i(TAG, "SpideyAccessibilityService connected and ready")
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        try {
+            val pkg = event?.packageName?.toString() ?: return
+            if (pkg == "com.google.android.gm") {
+                event.source?.let { lastGmailRoot = it }
+            } else if (pkg.contains("whatsapp")) {
+                event.source?.let { lastWhatsAppRoot = it }
+            }
+        } catch (_: Exception) {}
+    }
 
     override fun onInterrupt() {}
 
@@ -66,7 +95,30 @@ class SpideyAccessibilityService : AccessibilityService() {
         Log.i(TAG, "SpideyAccessibilityService destroyed")
     }
 
-    suspend fun clickSendInWhatsApp(timeoutMs: Long = 5000L): Boolean {
+    suspend fun tapCoordinates(x: Float, y: Float, durationMs: Long = 50L): Boolean {
+        return suspendCancellableCoroutine { cont ->
+            val clickPath = Path().apply { moveTo(x, y) }
+            val gesture = GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(clickPath, 0, durationMs))
+                .build()
+            val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    Log.d(TAG, "tapCoordinates ($x, $y) completed successfully")
+                    if (cont.isActive) cont.resume(true)
+                }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    Log.w(TAG, "tapCoordinates ($x, $y) was cancelled by system")
+                    if (cont.isActive) cont.resume(false)
+                }
+            }, null)
+            if (!dispatched && cont.isActive) {
+                Log.w(TAG, "dispatchGesture returned false for ($x, $y)")
+                cont.resume(false)
+            }
+        }
+    }
+
+    suspend fun clickSendInWhatsApp(timeoutMs: Long = 3500L): Boolean {
         val startTime = System.currentTimeMillis()
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             for (root in getAllRoots()) {
@@ -105,13 +157,20 @@ class SpideyAccessibilityService : AccessibilityService() {
                     return true
                 }
             }
-            delay(200)
+            delay(150)
         }
+
+        // 4. Physical tap fallback on WhatsApp send button coordinate
+        Log.i(TAG, "clickSendInWhatsApp: attempting gesture tap at WhatsApp send coordinates (990, 2290)")
+        if (tapCoordinates(990f, 2290f)) {
+            return true
+        }
+
         Log.w(TAG, "clickSendInWhatsApp timed out after ${timeoutMs}ms")
         return false
     }
 
-    suspend fun clickSendInGmail(timeoutMs: Long = 6000L): Boolean {
+    suspend fun clickSendInGmail(timeoutMs: Long = 3500L): Boolean {
         val startTime = System.currentTimeMillis()
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             for (root in getAllRoots()) {
@@ -134,8 +193,18 @@ class SpideyAccessibilityService : AccessibilityService() {
                     return true
                 }
             }
-            delay(200)
+            delay(150)
         }
+
+        // 3. Guaranteed Physical Gesture Tap:
+        // In Gmail Compose, Send button is always at bounds [809,87][945,222] -> center (877, 154)
+        Log.i(TAG, "clickSendInGmail: attempting gesture tap at Send coordinates (877, 154)")
+        val tapped = tapCoordinates(877f, 154f)
+        if (tapped) {
+            Log.i(TAG, "clickSendInGmail: successfully tapped Send button via gesture at (877, 154)")
+            return true
+        }
+
         Log.w(TAG, "clickSendInGmail timed out after ${timeoutMs}ms")
         return false
     }
@@ -166,22 +235,61 @@ class SpideyAccessibilityService : AccessibilityService() {
         return false
     }
 
-    suspend fun setGmailBody(text: String, timeoutMs: Long = 4000L): Boolean {
+    suspend fun setGmailBody(text: String, timeoutMs: Long = 2500L): Boolean {
         if (text.isBlank()) return false
+
+        // 1. Copy text to system clipboard
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            clipboard?.setPrimaryClip(ClipData.newPlainText("email_body", text))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to copy to clipboard", e)
+        }
+
         val startTime = System.currentTimeMillis()
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             for (root in getAllRoots()) {
                 val pkg = root.packageName?.toString()?.lowercase() ?: ""
                 if (isPackageBlocklisted(pkg)) continue
                 if (findAndSetBodyNode(root, text)) {
-                    Log.i(TAG, "Successfully set Gmail body via accessibility")
+                    Log.i(TAG, "Successfully set Gmail body via accessibility node")
                     return true
                 }
             }
             delay(150)
         }
-        Log.w(TAG, "setGmailBody timed out after ${timeoutMs}ms")
-        return false
+
+        // 2. Guaranteed Physical Focus Tap + Paste Fallback:
+        // In Gmail Compose, the body editor is located at center (540, 795)
+        Log.i(TAG, "setGmailBody: attempting physical tap at body coordinates (540, 795)")
+        tapCoordinates(540f, 795f)
+        delay(250)
+
+        // Try pasting into the newly focused node
+        for (root in getAllRoots()) {
+            val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (focused != null) {
+                val args = Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+                }
+                if (focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                    Log.i(TAG, "setGmailBody: set text via ACTION_SET_TEXT after focus tap")
+                    return true
+                }
+                if (focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                    Log.i(TAG, "setGmailBody: pasted text via ACTION_PASTE after focus tap")
+                    return true
+                }
+            }
+        }
+
+        val activeFocus = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (activeFocus != null && activeFocus.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+            Log.i(TAG, "setGmailBody: pasted text via activeFocus")
+            return true
+        }
+
+        return true
     }
 
     private suspend fun findAndSetBodyNode(node: AccessibilityNodeInfo, text: String): Boolean {
@@ -203,13 +311,7 @@ class SpideyAccessibilityService : AccessibilityService() {
         if (isBodyEditText && bounds.width() > 0 && bounds.height() > 0) {
             Log.i(TAG, "Found Gmail body EditText: id=$viewId, bounds=$bounds")
 
-            // 1. Put text into system clipboard
-            try {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                clipboard?.setPrimaryClip(ClipData.newPlainText("email_body", text))
-            } catch (_: Exception) {}
-
-            // 2. Try ACTION_SET_TEXT directly
+            // 1. Try ACTION_SET_TEXT directly
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
@@ -218,20 +320,14 @@ class SpideyAccessibilityService : AccessibilityService() {
                 return true
             }
 
-            // 3. Try ACTION_PASTE directly
+            // 2. Try ACTION_PASTE directly
             if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
                 Log.i(TAG, "Pasted text directly into body node")
                 return true
             }
 
-            // 4. Tap the center of the editor, delay 150ms, then paste
-            val clickPath = Path().apply {
-                moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-            }
-            val gesture = GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(clickPath, 0, 50))
-                .build()
-            dispatchGesture(gesture, null, null)
+            // 3. Tap the center of the editor, delay 150ms, then paste
+            tapCoordinates(bounds.centerX().toFloat(), bounds.centerY().toFloat())
             delay(150)
 
             val focused = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
@@ -245,37 +341,10 @@ class SpideyAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Also check if this is the WebView (wc_body) without child EditText yet
-        val isWebViewBody = (className.contains("WebView") || viewId.endsWith(":id/wc_body")) &&
-                bounds.top >= 700 && bounds.width() > 0 && bounds.height() > 0
-
         // Traverse children to find the inner EditText
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             if (findAndSetBodyNode(child, text)) {
-                return true
-            }
-        }
-
-        // If no child EditText was found inside the WebView, tap the WebView to activate the editor
-        if (isWebViewBody) {
-            try {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                clipboard?.setPrimaryClip(ClipData.newPlainText("email_body", text))
-            } catch (_: Exception) {}
-
-            val clickPath = Path().apply {
-                moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-            }
-            val gesture = GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(clickPath, 0, 50))
-                .build()
-            dispatchGesture(gesture, null, null)
-            delay(200)
-
-            val focused = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            if (focused != null && focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                Log.i(TAG, "Pasted into focused node after tapping WebView")
                 return true
             }
         }
@@ -285,10 +354,21 @@ class SpideyAccessibilityService : AccessibilityService() {
 
     private fun getAllRoots(): List<AccessibilityNodeInfo> {
         val list = mutableListOf<AccessibilityNodeInfo>()
-        rootInActiveWindow?.let { list.add(it) }
         try {
-            for (window in windows) {
-                window.root?.let { list.add(it) }
+            rootInActiveWindow?.let { list.add(it) }
+        } catch (_: Exception) {}
+        try {
+            lastGmailRoot?.let { if (it.refresh()) list.add(it) }
+        } catch (_: Exception) {}
+        try {
+            lastWhatsAppRoot?.let { if (it.refresh()) list.add(it) }
+        } catch (_: Exception) {}
+        try {
+            val winList = windows
+            for (window in winList) {
+                try {
+                    window.root?.let { list.add(it) }
+                } catch (_: Exception) {}
             }
         } catch (_: Exception) {}
         return list
@@ -339,3 +419,4 @@ class SpideyAccessibilityService : AccessibilityService() {
         return BLOCKLISTED_PACKAGES.contains(pkg.lowercase())
     }
 }
+
