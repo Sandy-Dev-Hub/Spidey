@@ -84,6 +84,12 @@ class SendMessageHandler(
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
                 BackgroundAppLauncher.launch(context, previewIntent)
+
+                // Inject body directly into Gmail compose box via Accessibility
+                if (body.isNotBlank() && SpideyAccessibilityService.isAvailable()) {
+                    delay(300)
+                    SpideyAccessibilityService.instance?.setGmailBody(body)
+                }
             }
 
             val preview = if (platform == MessagePlatform.EMAIL) {
@@ -203,7 +209,10 @@ class SendMessageHandler(
         }
 
         if (SpideyAccessibilityService.isAvailable()) {
-            delay(1000)
+            if (body.isNotBlank()) {
+                SpideyAccessibilityService.instance?.setGmailBody(body, timeoutMs = 2000L)
+            }
+            delay(500)
             val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 6000L) == true
             return if (clicked) {
                 ActionResult.Success(spokenMessage = "Email sent to $email boss.")

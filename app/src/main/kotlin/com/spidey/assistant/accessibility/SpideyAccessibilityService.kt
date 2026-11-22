@@ -2,8 +2,12 @@ package com.spidey.assistant.accessibility
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -147,6 +151,98 @@ class SpideyAccessibilityService : AccessibilityService() {
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             if (findAndClickSendNode(child)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    suspend fun setGmailBody(text: String, timeoutMs: Long = 4000L): Boolean {
+        if (text.isBlank()) return false
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            for (root in getAllRoots()) {
+                val pkg = root.packageName?.toString()?.lowercase() ?: ""
+                if (isPackageBlocklisted(pkg)) continue
+                if (findAndSetBodyNode(root, text)) {
+                    Log.i(TAG, "Successfully set Gmail body via accessibility")
+                    return true
+                }
+            }
+            delay(200)
+        }
+        Log.w(TAG, "setGmailBody timed out after ${timeoutMs}ms")
+        return false
+    }
+
+    private fun findAndSetBodyNode(node: AccessibilityNodeInfo, text: String): Boolean {
+        if (node.isPassword) return false
+        val viewId = node.viewIdResourceName ?: ""
+        val className = node.className?.toString() ?: ""
+
+        val isSubject = viewId.endsWith(":id/subject") || viewId.contains("subject")
+        val isRecipient = viewId.contains("to") || viewId.contains("recipient") || viewId.contains("peoplekit")
+        val isBody = viewId == "editor" ||
+                viewId.endsWith(":id/wc_body_layout") ||
+                (className == "android.widget.EditText" && !isSubject && !isRecipient)
+
+        if (isBody) {
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            // 1. Try ACTION_SET_TEXT
+            if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                Log.i(TAG, "Set text on body node via ACTION_SET_TEXT: viewId=$viewId")
+                return true
+            }
+
+            // 2. Focus + ACTION_SET_TEXT
+            node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                Log.i(TAG, "Set text on focused body node: viewId=$viewId")
+                return true
+            }
+
+            // 3. Fallback: Copy to clipboard and paste
+            try {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                clipboard?.setPrimaryClip(ClipData.newPlainText("email_body", text))
+                if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                    Log.i(TAG, "Pasted text into body node via ACTION_PASTE: viewId=$viewId")
+                    return true
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Clipboard paste failed: ${e.message}")
+            }
+
+            // 4. Gesture tap to focus then paste
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+            if (!bounds.isEmpty && bounds.width() > 0 && bounds.height() > 0) {
+                val clickPath = Path().apply {
+                    moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+                }
+                val gesture = GestureDescription.Builder()
+                    .addStroke(GestureDescription.StrokeDescription(clickPath, 0, 50))
+                    .build()
+                dispatchGesture(gesture, null, null)
+
+                try {
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("email_body", text))
+                    if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                        Log.i(TAG, "Pasted text after tap into body node: viewId=$viewId")
+                        return true
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Clipboard paste failed: ${e.message}")
+                }
+            }
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (findAndSetBodyNode(child, text)) {
                 return true
             }
         }
