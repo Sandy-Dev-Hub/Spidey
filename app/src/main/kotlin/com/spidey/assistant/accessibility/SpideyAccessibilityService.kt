@@ -66,7 +66,7 @@ class SpideyAccessibilityService : AccessibilityService() {
         Log.i(TAG, "SpideyAccessibilityService destroyed")
     }
 
-    suspend fun clickSendInWhatsApp(timeoutMs: Long = 4500L): Boolean {
+    suspend fun clickSendInWhatsApp(timeoutMs: Long = 5000L): Boolean {
         val startTime = System.currentTimeMillis()
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             for (root in getAllRoots()) {
@@ -75,25 +75,34 @@ class SpideyAccessibilityService : AccessibilityService() {
                 if (!pkg.contains("whatsapp")) continue
 
                 // 1. Try WhatsApp send button by view id
-                val sendNodes = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/send")
-                for (node in sendNodes) {
-                    if (clickNodeOrTap(node)) {
-                        Log.i(TAG, "Clicked WhatsApp send button via id")
-                        return true
-                    }
-                }
-
-                // 2. Try by content description or text
-                val descNodes = root.findAccessibilityNodeInfosByText("Send")
-                for (node in descNodes) {
-                    val desc = node.contentDescription?.toString()
-                    val text = node.text?.toString()
-                    if (desc.equals("Send", ignoreCase = true) || text.equals("Send", ignoreCase = true)) {
+                try {
+                    val sendNodes = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/send")
+                    for (node in sendNodes) {
                         if (clickNodeOrTap(node)) {
-                            Log.i(TAG, "Clicked WhatsApp send button via text/desc")
+                            Log.i(TAG, "Clicked WhatsApp send button via id")
                             return true
                         }
                     }
+                } catch (_: Exception) {}
+
+                // 2. Try by content description or text
+                try {
+                    val descNodes = root.findAccessibilityNodeInfosByText("Send")
+                    for (node in descNodes) {
+                        val desc = node.contentDescription?.toString()
+                        val text = node.text?.toString()
+                        if (desc.equals("Send", ignoreCase = true) || text.equals("Send", ignoreCase = true)) {
+                            if (clickNodeOrTap(node)) {
+                                Log.i(TAG, "Clicked WhatsApp send button via text/desc")
+                                return true
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // 3. Recursive search
+                if (findAndClickSendNode(root)) {
+                    return true
                 }
             }
             delay(200)
@@ -169,7 +178,7 @@ class SpideyAccessibilityService : AccessibilityService() {
                     return true
                 }
             }
-            delay(200)
+            delay(150)
         }
         Log.w(TAG, "setGmailBody timed out after ${timeoutMs}ms")
         return false
@@ -183,19 +192,17 @@ class SpideyAccessibilityService : AccessibilityService() {
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
 
-        val isSubject = viewId.endsWith(":id/subject") || viewId.contains("subject")
+        val isSubject = viewId.contains("subject") || (bounds.bottom > 0 && bounds.bottom <= 721)
         val isRecipient = viewId.contains("to") || viewId.contains("recipient") || viewId.contains("peoplekit")
 
-        // In Gmail compose, body is in wc_body / editor / compose_body_parent below y=700
-        val isBody = !isSubject && !isRecipient && (
-                viewId == "editor" ||
-                viewId.endsWith(":id/wc_body") ||
-                viewId.endsWith(":id/wc_body_layout") ||
-                viewId.endsWith(":id/body_wrapper") ||
-                (bounds.top >= 700 && (className.contains("EditText") || className.contains("WebView")))
-        )
+        // Target ONLY the editable EditText in the message body area (below Subject, top >= 700)
+        val isBodyEditText = (className.endsWith("EditText") || node.isEditable) &&
+                !isSubject && !isRecipient &&
+                (viewId == "editor" || bounds.top >= 700)
 
-        if (isBody && bounds.width() > 0 && bounds.height() > 0) {
+        if (isBodyEditText && bounds.width() > 0 && bounds.height() > 0) {
+            Log.i(TAG, "Found Gmail body EditText: id=$viewId, bounds=$bounds")
+
             // 1. Put text into system clipboard
             try {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -207,17 +214,17 @@ class SpideyAccessibilityService : AccessibilityService() {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
             if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-                Log.i(TAG, "Set text on body node via ACTION_SET_TEXT: viewId=$viewId")
+                Log.i(TAG, "Set text on body node via ACTION_SET_TEXT")
                 return true
             }
 
-            // 3. Try ACTION_PASTE directly on node
+            // 3. Try ACTION_PASTE directly
             if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                Log.i(TAG, "Pasted text directly into body node: viewId=$viewId")
+                Log.i(TAG, "Pasted text directly into body node")
                 return true
             }
 
-            // 4. Tap to focus the body area, wait 250ms, then paste into active focus
+            // 4. Tap the center of the editor, delay 150ms, then paste
             val clickPath = Path().apply {
                 moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat())
             }
@@ -225,25 +232,54 @@ class SpideyAccessibilityService : AccessibilityService() {
                 .addStroke(GestureDescription.StrokeDescription(clickPath, 0, 50))
                 .build()
             dispatchGesture(gesture, null, null)
-            delay(250)
+            delay(150)
 
             val focused = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             if (focused != null && focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                Log.i(TAG, "Pasted into focused node after tap: viewId=$viewId")
+                Log.i(TAG, "Pasted into focused node after tap")
                 return true
             }
             if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                Log.i(TAG, "Pasted into node after tap: viewId=$viewId")
+                Log.i(TAG, "Pasted into body node after tap")
                 return true
             }
         }
 
+        // Also check if this is the WebView (wc_body) without child EditText yet
+        val isWebViewBody = (className.contains("WebView") || viewId.endsWith(":id/wc_body")) &&
+                bounds.top >= 700 && bounds.width() > 0 && bounds.height() > 0
+
+        // Traverse children to find the inner EditText
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             if (findAndSetBodyNode(child, text)) {
                 return true
             }
         }
+
+        // If no child EditText was found inside the WebView, tap the WebView to activate the editor
+        if (isWebViewBody) {
+            try {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                clipboard?.setPrimaryClip(ClipData.newPlainText("email_body", text))
+            } catch (_: Exception) {}
+
+            val clickPath = Path().apply {
+                moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+            }
+            val gesture = GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(clickPath, 0, 50))
+                .build()
+            dispatchGesture(gesture, null, null)
+            delay(200)
+
+            val focused = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (focused != null && focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                Log.i(TAG, "Pasted into focused node after tapping WebView")
+                return true
+            }
+        }
+
         return false
     }
 
