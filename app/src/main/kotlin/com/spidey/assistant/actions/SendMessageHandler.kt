@@ -77,6 +77,18 @@ class SendMessageHandler(
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_CLEAR_TASK
                 }
                 BackgroundAppLauncher.launch(context, previewIntent)
+            } else if (platform == MessagePlatform.WHATSAPP && recipient.isNotBlank() && body.isNotBlank()) {
+                val previewNumber = resolveNumber(recipient)
+                val uri = if (previewNumber.isNotBlank()) {
+                    Uri.parse("https://api.whatsapp.com/send?phone=$previewNumber&text=${Uri.encode(body)}")
+                } else {
+                    Uri.parse("https://api.whatsapp.com/send?text=${Uri.encode(body)}")
+                }
+                val previewIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    setPackage("com.whatsapp")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                BackgroundAppLauncher.launch(context, previewIntent)
             }
 
             val preview = if (platform == MessagePlatform.EMAIL) {
@@ -102,6 +114,35 @@ class SendMessageHandler(
             MessagePlatform.EMAIL -> sendEmail(recipient, body, action.subject)
             MessagePlatform.SMS -> sendSms(recipient, body)
         }
+    }
+
+    private suspend fun resolveNumber(recipient: String): String {
+        val isRawNumber = recipient.all { it.isDigit() || it == '+' || it == ' ' || it == '-' } && recipient.length >= 7
+        var cleanNumber: String? = null
+        if (isRawNumber) {
+            cleanNumber = recipient.replace(Regex("[^0-9+]"), "").removePrefix("+")
+        } else if (contactRepository != null) {
+            when (val res = contactRepository.findContact(recipient)) {
+                is ContactResolution.Resolved -> {
+                    val phone = res.contact.phoneNumbers.firstOrNull()?.number
+                    if (phone != null) {
+                        cleanNumber = phone.replace(Regex("[^0-9+]"), "").removePrefix("+")
+                    }
+                }
+                else -> {}
+            }
+        }
+        var intlNumber = cleanNumber ?: ""
+        if (intlNumber.isNotBlank()) {
+            intlNumber = intlNumber.replace(Regex("[^0-9]"), "")
+            if (intlNumber.startsWith("0") && intlNumber.length == 11) {
+                intlNumber = intlNumber.removePrefix("0")
+            }
+            if (intlNumber.length == 10 && !intlNumber.startsWith("91")) {
+                intlNumber = "91$intlNumber"
+            }
+        }
+        return intlNumber
     }
 
     private suspend fun sendWhatsApp(recipient: String, body: String): ActionResult {
@@ -143,20 +184,23 @@ class SendMessageHandler(
             }
         }
 
-        val intent = if (intlNumber.isNotBlank()) {
-            Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                setPackage("com.whatsapp")
-                putExtra(Intent.EXTRA_TEXT, body)
-                putExtra("jid", "$intlNumber@s.whatsapp.net")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        // 1. If WhatsApp is already open on-screen (e.g. from preview), attempt immediate send!
+        if (SpideyAccessibilityService.isAvailable()) {
+            val sent = SpideyAccessibilityService.instance?.setWhatsAppBodyAndSend(body, timeoutMs = 2500L) == true
+            if (sent) {
+                return ActionResult.Success(spokenMessage = "Message sent to $resolvedName on WhatsApp boss.")
             }
+        }
+
+        // 2. Open chat via WhatsApp deep link
+        val uri = if (intlNumber.isNotBlank()) {
+            Uri.parse("https://api.whatsapp.com/send?phone=$intlNumber&text=${Uri.encode(body)}")
         } else {
-            val uri = Uri.parse("https://api.whatsapp.com/send?text=${Uri.encode(body)}")
-            Intent(Intent.ACTION_VIEW, uri).apply {
-                setPackage("com.whatsapp")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
+            Uri.parse("https://api.whatsapp.com/send?text=${Uri.encode(body)}")
+        }
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            setPackage("com.whatsapp")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
 
         val launched = BackgroundAppLauncher.launch(context, intent)
@@ -166,7 +210,7 @@ class SendMessageHandler(
 
         if (SpideyAccessibilityService.isAvailable()) {
             delay(1200) // Allow WhatsApp UI to render
-            val clicked = SpideyAccessibilityService.instance?.clickSendInWhatsApp() == true
+            val clicked = SpideyAccessibilityService.instance?.setWhatsAppBodyAndSend(body, timeoutMs = 4000L) == true
             return if (clicked) {
                 ActionResult.Success(spokenMessage = "Message sent to $resolvedName on WhatsApp boss.")
             } else {

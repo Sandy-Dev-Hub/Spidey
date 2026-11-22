@@ -119,14 +119,20 @@ class SpideyAccessibilityService : AccessibilityService() {
     }
 
     suspend fun clickSendInWhatsApp(timeoutMs: Long = 3500L): Boolean {
+        return setWhatsAppBodyAndSend("", timeoutMs)
+    }
+
+    suspend fun setWhatsAppBodyAndSend(text: String, timeoutMs: Long = 4000L): Boolean {
         val startTime = System.currentTimeMillis()
+        var textInserted = false
+
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             for (root in getAllRoots()) {
                 val pkg = root.packageName?.toString()?.lowercase() ?: ""
                 if (isPackageBlocklisted(pkg)) continue
                 if (!pkg.contains("whatsapp")) continue
 
-                // 1. Try WhatsApp send button by view id
+                // 1. If Send button is ALREADY visible (text already in box), click it immediately!
                 try {
                     val sendNodes = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/send")
                     for (node in sendNodes) {
@@ -137,13 +143,42 @@ class SpideyAccessibilityService : AccessibilityService() {
                     }
                 } catch (_: Exception) {}
 
-                // 2. Try by content description or text
+                // 2. If text was specified and not yet inserted, find WhatsApp message entry box
+                if (!textInserted && text.isNotBlank()) {
+                    try {
+                        val entryNodes = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/entry")
+                        for (entry in entryNodes) {
+                            val cur = entry.text?.toString() ?: ""
+                            if (cur.isBlank()) {
+                                try {
+                                    val cb = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    cb?.setPrimaryClip(ClipData.newPlainText("wa_msg", text))
+                                } catch (_: Exception) {}
+
+                                val args = Bundle().apply {
+                                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+                                }
+                                if (entry.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) ||
+                                    entry.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+                                    Log.i(TAG, "Inserted message text into WhatsApp entry field")
+                                    textInserted = true
+                                    break
+                                }
+                            } else {
+                                textInserted = true
+                                break
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                // 3. Try WhatsApp send button by content description or text
                 try {
                     val descNodes = root.findAccessibilityNodeInfosByText("Send")
                     for (node in descNodes) {
                         val desc = node.contentDescription?.toString()
-                        val text = node.text?.toString()
-                        if (desc.equals("Send", ignoreCase = true) || text.equals("Send", ignoreCase = true)) {
+                        val nodeText = node.text?.toString()
+                        if (desc.equals("Send", ignoreCase = true) || nodeText.equals("Send", ignoreCase = true)) {
                             if (clickNodeOrTap(node)) {
                                 Log.i(TAG, "Clicked WhatsApp send button via text/desc")
                                 return true
@@ -152,7 +187,7 @@ class SpideyAccessibilityService : AccessibilityService() {
                     }
                 } catch (_: Exception) {}
 
-                // 3. Recursive search
+                // 4. Recursive search
                 if (findAndClickSendNode(root)) {
                     return true
                 }
@@ -160,13 +195,17 @@ class SpideyAccessibilityService : AccessibilityService() {
             delay(150)
         }
 
-        // 4. Physical tap fallback on WhatsApp send button coordinate
-        Log.i(TAG, "clickSendInWhatsApp: attempting gesture tap at WhatsApp send coordinates (990, 2290)")
+        // 5. Physical tap fallback on WhatsApp send button coordinates
+        // (990, 2290) when keyboard is hidden, (990, 1330) when keyboard is open
+        Log.i(TAG, "setWhatsAppBodyAndSend: attempting gesture tap at WhatsApp send coordinates (990, 2290)")
         if (tapCoordinates(990f, 2290f)) {
             return true
         }
+        if (tapCoordinates(990f, 1330f)) {
+            return true
+        }
 
-        Log.w(TAG, "clickSendInWhatsApp timed out after ${timeoutMs}ms")
+        Log.w(TAG, "setWhatsAppBodyAndSend timed out after ${timeoutMs}ms")
         return false
     }
 

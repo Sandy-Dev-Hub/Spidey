@@ -30,7 +30,9 @@ import com.spidey.assistant.safety.ConfirmationPolicy
  * 6. Conversational Chat (routed to Groq via ChatAction)
  * 7. Clarify / null (never fall back to typing raw transcripts into search bars)
  */
-class IntentEngine {
+class IntentEngine(
+    private val contactRepository: com.spidey.assistant.contacts.ContactRepository? = null
+) {
 
     fun parse(text: String, candidatesContext: List<String> = emptyList()): AssistantAction? {
         val normalized = text.trim().lowercase()
@@ -317,6 +319,39 @@ class IntentEngine {
                     }
                 }
             }
+
+            // In-app messaging commands while WhatsApp is foreground
+            if (clean == "send" || clean == "send it" || clean == "send message" || clean == "send this message") {
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = "",
+                    body = "",
+                    platform = com.spidey.assistant.actions.MessagePlatform.WHATSAPP,
+                    isConfirmed = true
+                )
+            }
+            if (clean.startsWith("send message to ") || clean.startsWith("message ")) {
+                val after = if (clean.startsWith("send message to ")) clean.removePrefix("send message to ") else clean.removePrefix("message ")
+                val (recipient, body) = splitRecipientAndBody(after)
+                if (recipient.isNotBlank()) {
+                    return com.spidey.assistant.actions.SendMessageAction(
+                        recipient = recipient,
+                        body = body,
+                        platform = com.spidey.assistant.actions.MessagePlatform.WHATSAPP
+                    )
+                }
+            }
+            if (clean.startsWith("type ") || clean.startsWith("write ")) {
+                val body = if (clean.startsWith("type ")) clean.removePrefix("type ") else clean.removePrefix("write ")
+                if (body.isNotBlank()) {
+                    return com.spidey.assistant.actions.SendMessageAction(
+                        recipient = "",
+                        body = body,
+                        platform = com.spidey.assistant.actions.MessagePlatform.WHATSAPP,
+                        isConfirmed = false
+                    )
+                }
+            }
+
             if (expressesChange || clean.startsWith("play ") || clean.startsWith("search ")) {
                 // Strict rule: No cross-app fallback! Report honestly
                 return InAppUnsupportedAction(appName = "WhatsApp", command = "media playback")
@@ -1323,12 +1358,55 @@ class IntentEngine {
         }
 
         // 2. WhatsApp Messaging
-        val waOnPattern = Regex("^(?:send\\s+(?:a\\s+)?message\\s+to|message)\\s+(.+?)\\s+(?:on|via|in)\\s+whatsapp(?:\\s+(?:saying|that|:))?(?:\\s+(.*))?$", RegexOption.IGNORE_CASE)
-        val waOnMatch = waOnPattern.find(clean)
-        if (waOnMatch != null) {
-            val recipient = waOnMatch.groupValues[1].trim()
-            val body = waOnMatch.groupValues[2].trim()
-            if (recipient.isNotBlank() && recipient != "whatsapp") {
+        val bareWhatsAppTriggers = setOf(
+            "send whatsapp", "send a whatsapp", "send whatsapp message", "send a whatsapp message",
+            "send message on whatsapp", "send a message on whatsapp", "send message in whatsapp", "send a message in whatsapp",
+            "send message via whatsapp", "send a message via whatsapp",
+            "open whatsapp and send message", "open whatsapp and send a message",
+            "open whatsapp and write message", "open whatsapp and write a message",
+            "open whatsapp write message", "open whatsapp send message", "open whatsapp and message",
+            "open whatsapp message", "open whatsapp to send a message", "open whatsapp to write a message",
+            "compose whatsapp", "write whatsapp", "new whatsapp message", "whatsapp message"
+        )
+        if (bareWhatsAppTriggers.contains(clean)) {
+            return com.spidey.assistant.actions.SendMessageAction(
+                recipient = "",
+                body = "",
+                platform = com.spidey.assistant.actions.MessagePlatform.WHATSAPP
+            )
+        }
+
+        val waPrefixes = listOf(
+            "open whatsapp and send a message to ", "open whatsapp and send message to ",
+            "open whatsapp and write a message to ", "open whatsapp and write message to ",
+            "open whatsapp and message to ", "open whatsapp and message ",
+            "open whatsapp send a message to ", "open whatsapp send message to ",
+            "open whatsapp write a message to ", "open whatsapp write message to ",
+            "open whatsapp message to ", "open whatsapp message ",
+            "open whatsapp to send a message to ", "open whatsapp to send message to ",
+            "open whatsapp to write a message to ", "open whatsapp to write message to ",
+            "open whatsapp to message to ", "open whatsapp to message ",
+            "send a whatsapp message to ", "send a whatsapp to ",
+            "send whatsapp message to ", "send whatsapp to ",
+            "whatsapp message to ", "whatsapp to ",
+            "compose a whatsapp message to ", "compose whatsapp to ",
+            "write a whatsapp message to ", "write whatsapp to "
+        )
+        val matchedWa = waPrefixes.firstOrNull { clean.startsWith(it) }
+        if (matchedWa != null) {
+            var after = clean.removePrefix(matchedWa).trim()
+            if (after.startsWith("to ")) {
+                after = after.removePrefix("to ").trim()
+            }
+            if (after.isBlank()) {
+                return com.spidey.assistant.actions.SendMessageAction(
+                    recipient = "",
+                    body = "",
+                    platform = com.spidey.assistant.actions.MessagePlatform.WHATSAPP
+                )
+            }
+            val (recipient, body) = splitRecipientAndBody(after)
+            if (recipient.isNotBlank()) {
                 return com.spidey.assistant.actions.SendMessageAction(
                     recipient = recipient,
                     body = body,
@@ -1337,16 +1415,19 @@ class IntentEngine {
             }
         }
 
-        // B. "send whatsapp [message] to <recipient> [saying/that/: <body>]"
-        if (clean.startsWith("send whatsapp message to ") || clean.startsWith("send whatsapp to ") || clean.startsWith("whatsapp message to ")) {
-            val after = when {
-                clean.startsWith("send whatsapp message to ") -> clean.removePrefix("send whatsapp message to ")
-                clean.startsWith("send whatsapp to ") -> clean.removePrefix("send whatsapp to ")
-                else -> clean.removePrefix("whatsapp message to ")
-            }.trim()
-
-            val (recipient, body) = splitRecipientAndBody(after)
-            if (recipient.isNotBlank()) {
+        val waOnPattern = Regex("^(?:send\\s+(?:a\\s+)?message\\s+to|write\\s+(?:a\\s+)?message\\s+to|message|text)\\s+(.+?)\\s+(?:on|via|in)\\s+whatsapp(?:\\s+(.*))?$", RegexOption.IGNORE_CASE)
+        val waOnMatch = waOnPattern.find(clean)
+        if (waOnMatch != null) {
+            val recipient = waOnMatch.groupValues[1].trim()
+            var body = waOnMatch.groupValues[2].trim()
+            val leadDelims = listOf("saying ", "that ", "with message ", "with body ", ": ", "as ")
+            for (d in leadDelims) {
+                if (body.startsWith(d)) {
+                    body = body.removePrefix(d).trim()
+                    break
+                }
+            }
+            if (recipient.isNotBlank() && recipient != "whatsapp") {
                 return com.spidey.assistant.actions.SendMessageAction(
                     recipient = recipient,
                     body = body,
@@ -1521,6 +1602,37 @@ class IntentEngine {
             }
             // For email commands without an email indicator, do not treat random words as an email recipient
             return Pair("", "")
+        }
+
+        // For non-email (e.g. WhatsApp, SMS):
+        val normText = text.trim()
+        val cached = contactRepository?.getCachedContacts() ?: emptyList()
+        for (c in cached) {
+            val cName = c.displayName.trim().lowercase()
+            if (cName.isNotBlank() && (normText.startsWith("$cName ") || normText.startsWith("$cName:"))) {
+                val rest = normText.substring(cName.length).trim().removePrefix(":").trim()
+                var body = rest
+                val leadDelims = listOf("saying ", "that ", "with message ", "with body ", "the message is ", ": ")
+                for (d in leadDelims) {
+                    if (body.startsWith(d)) {
+                        body = body.removePrefix(d).trim()
+                        break
+                    }
+                }
+                return Pair(c.displayName, body)
+            }
+        }
+
+        val secondaryDelims = listOf(" the ", " please ", " i ", " we ")
+        for (delim in secondaryDelims) {
+            if (normText.contains(delim)) {
+                val parts = normText.split(delim, limit = 2)
+                val possibleRecipient = parts[0].trim()
+                if (possibleRecipient.split("\\s+".toRegex()).size <= 3) {
+                    val body = delim.trim() + " " + parts[1].trim()
+                    return Pair(possibleRecipient, body.trim())
+                }
+            }
         }
 
         val words = text.split("\\s+".toRegex()).filter { it.isNotBlank() }

@@ -183,7 +183,7 @@ class WakeWordService : Service() {
             register(com.spidey.assistant.actions.ChatHandler())
         }
 
-        intentEngine = IntentEngine()
+        intentEngine = IntentEngine(contactRepository)
 
         speechOutput = SpeechOutput(this)
 

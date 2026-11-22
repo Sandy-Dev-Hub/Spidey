@@ -26,6 +26,8 @@ class ContactRepository(
     private var lastCacheTime = 0L
     private val cacheDurationMs = 5 * 60 * 1000L // 5 minutes
 
+    fun getCachedContacts(): List<ContactRecord> = cachedContacts ?: emptyList()
+
     suspend fun findContact(query: String): ContactResolution = withContext(Dispatchers.IO) {
         if (!permissionManager.hasReadContacts()) {
             return@withContext ContactResolution.PermissionDenied

@@ -955,6 +955,27 @@ class IntentEngineTest {
         assertEquals("amma", a4.recipient)
         assertEquals("hello", a4.body)
         assertEquals(com.spidey.assistant.actions.MessagePlatform.WHATSAPP, a4.platform)
+
+        // WhatsApp direct variations
+        val wa1 = intentEngine.parse("open WhatsApp and send a message to Amma the meeting is on 5:00 p.m.") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("amma", wa1.recipient)
+        assertEquals("the meeting is on 5:00 p.m.", wa1.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.WHATSAPP, wa1.platform)
+
+        val wa2 = intentEngine.parse("Open WhatsApp send message to Amma") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("amma", wa2.recipient)
+        assertEquals("", wa2.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.WHATSAPP, wa2.platform)
+
+        val wa3 = intentEngine.parse("send message on WhatsApp") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("", wa3.recipient)
+        assertEquals("", wa3.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.WHATSAPP, wa3.platform)
+
+        val wa4 = intentEngine.parse("send a message to Amma on whatsapp saying hello") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("amma", wa4.recipient)
+        assertEquals("hello", wa4.body)
+        assertEquals(com.spidey.assistant.actions.MessagePlatform.WHATSAPP, wa4.platform)
     }
 
     @Test
