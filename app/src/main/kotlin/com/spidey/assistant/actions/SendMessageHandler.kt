@@ -215,7 +215,7 @@ class SendMessageHandler(
     }
 
     private fun cleanEmail(raw: String): String {
-        var s = raw.trim().lowercase()
+        var s = raw.trim().lowercase().removePrefix("mailto:").trim()
         s = s.replace(" at the rate of ", "@")
             .replace(" at the rate ", "@")
             .replace(" at the rateof ", "@")

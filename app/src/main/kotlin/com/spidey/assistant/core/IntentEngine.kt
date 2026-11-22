@@ -1492,7 +1492,9 @@ class IntentEngine {
     }
 
     private fun splitRecipientAndBody(text: String, isEmail: Boolean = false): Pair<String, String> {
-        val delimiters = listOf(" saying ", " that ", ": ")
+        val delimiters = listOf(
+            " saying ", " that ", " with message ", " with body ", " message ", " body ", ": "
+        )
         for (delim in delimiters) {
             if (text.contains(delim)) {
                 val parts = text.split(delim, limit = 2)
@@ -1506,7 +1508,7 @@ class IntentEngine {
             if (match != null) {
                 val emailPart = match.groupValues[1].trim()
                 var rest = match.groupValues[2].trim()
-                for (d in listOf("saying ", "that ", ": ")) {
+                for (d in listOf("saying ", "that ", "with message ", "with body ", ": ")) {
                     if (rest.startsWith(d)) {
                         rest = rest.removePrefix(d).trim()
                         break
@@ -1514,10 +1516,18 @@ class IntentEngine {
                 }
                 return Pair(emailPart, rest)
             }
+            // If it contains an email indicator without an explicit delimiter, the entire string is the recipient
+            if (text.contains("@") || text.contains(" at ") || text.contains(".com") || text.contains(" dot ")) {
+                return Pair(text.trim(), "")
+            }
         }
 
-        val words = text.split("\\s+".toRegex())
-        return if (words.size > 1) {
+        val words = text.split("\\s+".toRegex()).filter { it.isNotBlank() }
+        if (words.size <= 3 && !isEmail) {
+            return Pair(text.trim(), "")
+        }
+
+        return if (words.size > 1 && !isEmail) {
             Pair(words[0].trim(), words.drop(1).joinToString(" ").trim())
         } else {
             Pair(text.trim(), "")

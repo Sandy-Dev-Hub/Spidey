@@ -1017,5 +1017,14 @@ class IntentEngineTest {
 
         val openMail = intentEngine.parse("open mail") as com.spidey.assistant.actions.OpenAppAction
         assertEquals(com.spidey.assistant.actions.AllowedApp.GMAIL, openMail.app)
+
+        // 6. Email addresses with spaces (from speech recognizer) must NOT put email into body
+        val spacedEmail1 = intentEngine.parse("open mail and write an email to vikki abi 2005@gmail.com") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikkiabi2005@gmail.com", spacedEmail1.recipient)
+        assertEquals("", spacedEmail1.body)
+
+        val spacedEmail2 = intentEngine.parse("open mail and write an email to vikki abi 2005 at gmail dot com") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikkiabi2005@gmail.com", spacedEmail2.recipient)
+        assertEquals("", spacedEmail2.body)
     }
 }
