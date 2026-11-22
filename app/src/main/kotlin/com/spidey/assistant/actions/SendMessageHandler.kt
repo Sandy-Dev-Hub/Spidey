@@ -30,7 +30,8 @@ class SendMessageHandler(
             return ActionResult.Success(spokenMessage = "Message cancelled boss.")
         }
 
-        if (recipient.isBlank()) {
+        val isEmailInvalid = platform == MessagePlatform.EMAIL && !cleanEmail(recipient).contains("@")
+        if (recipient.isBlank() || isEmailInvalid) {
             if (platform == MessagePlatform.EMAIL) {
                 return ActionResult.NeedsClarification(
                     question = "What is the recipient email address boss?",
@@ -52,7 +53,7 @@ class SendMessageHandler(
                 val preOpenIntent = Intent(Intent.ACTION_SENDTO, mailtoUri).apply {
                     setPackage("com.google.android.gm")
                     putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
                 BackgroundAppLauncher.launch(context, preOpenIntent)
             }
@@ -80,7 +81,7 @@ class SendMessageHandler(
                     putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
                     putExtra(Intent.EXTRA_SUBJECT, mailSubject)
                     putExtra(Intent.EXTRA_TEXT, body)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
                 BackgroundAppLauncher.launch(context, previewIntent)
             }
@@ -193,7 +194,7 @@ class SendMessageHandler(
             putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
             putExtra(Intent.EXTRA_SUBJECT, mailSubject)
             putExtra(Intent.EXTRA_TEXT, body)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
 
         val launched = BackgroundAppLauncher.launch(context, emailIntent)
@@ -202,8 +203,8 @@ class SendMessageHandler(
         }
 
         if (SpideyAccessibilityService.isAvailable()) {
-            delay(1200)
-            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 4500L) == true
+            delay(1000)
+            val clicked = SpideyAccessibilityService.instance?.clickSendInGmail(timeoutMs = 6000L) == true
             return if (clicked) {
                 ActionResult.Success(spokenMessage = "Email sent to $email boss.")
             } else {
@@ -216,6 +217,18 @@ class SendMessageHandler(
 
     private fun cleanEmail(raw: String): String {
         var s = raw.trim().lowercase().removePrefix("mailto:").trim()
+        val prefixes = listOf(
+            "send an email to ", "send a email to ", "send email to ",
+            "send a mail to ", "send mail to ", "write an email to ",
+            "write a email to ", "write email to ", "write to ",
+            "email to ", "mail to ", "to "
+        )
+        for (prefix in prefixes) {
+            if (s.startsWith(prefix)) {
+                s = s.removePrefix(prefix).trim()
+                break
+            }
+        }
         s = s.replace(" at the rate of ", "@")
             .replace(" at the rate ", "@")
             .replace(" at the rateof ", "@")

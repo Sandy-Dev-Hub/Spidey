@@ -365,8 +365,9 @@ class IntentEngine {
         ) {
             if (isStopCommand(reply)) return StopAction()
             val cleanEmail = normalizeEmail(reply)
+            val finalEmail = if (cleanEmail.contains("@")) cleanEmail else ""
             return com.spidey.assistant.actions.SendMessageAction(
-                recipient = cleanEmail,
+                recipient = finalEmail,
                 body = "",
                 platform = com.spidey.assistant.actions.MessagePlatform.EMAIL,
                 isConfirmed = false
@@ -1433,14 +1434,12 @@ class IntentEngine {
 
             val (rawRecipient, body) = splitRecipientAndBody(remaining, isEmail = true)
             val recipient = normalizeEmail(rawRecipient)
-            if (recipient.isNotBlank()) {
-                return com.spidey.assistant.actions.SendMessageAction(
-                    recipient = recipient,
-                    body = body,
-                    platform = com.spidey.assistant.actions.MessagePlatform.EMAIL,
-                    subject = subject
-                )
-            }
+            return com.spidey.assistant.actions.SendMessageAction(
+                recipient = recipient,
+                body = body,
+                platform = com.spidey.assistant.actions.MessagePlatform.EMAIL,
+                subject = subject
+            )
         }
 
         // 4. SMS Messaging
@@ -1520,6 +1519,8 @@ class IntentEngine {
             if (text.contains("@") || text.contains(" at ") || text.contains(".com") || text.contains(" dot ")) {
                 return Pair(text.trim(), "")
             }
+            // For email commands without an email indicator, do not treat random words as an email recipient
+            return Pair("", "")
         }
 
         val words = text.split("\\s+".toRegex()).filter { it.isNotBlank() }
@@ -1596,7 +1597,19 @@ class IntentEngine {
     }
 
     private fun normalizeEmail(raw: String): String {
-        var res = raw.trim().lowercase()
+        var res = raw.trim().lowercase().removePrefix("mailto:").trim()
+        val prefixes = listOf(
+            "send an email to ", "send a email to ", "send email to ",
+            "send a mail to ", "send mail to ", "write an email to ",
+            "write a email to ", "write email to ", "write to ",
+            "email to ", "mail to ", "to "
+        )
+        for (prefix in prefixes) {
+            if (res.startsWith(prefix)) {
+                res = res.removePrefix(prefix).trim()
+                break
+            }
+        }
         res = res
             .replace(" at the rate of ", "@")
             .replace(" at the rate ", "@")

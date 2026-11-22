@@ -1026,5 +1026,23 @@ class IntentEngineTest {
         val spacedEmail2 = intentEngine.parse("open mail and write an email to vikki abi 2005 at gmail dot com") as com.spidey.assistant.actions.SendMessageAction
         assertEquals("vikkiabi2005@gmail.com", spacedEmail2.recipient)
         assertEquals("", spacedEmail2.body)
+
+        // 7. Non-email or bare "mail" must NOT be treated as recipient
+        val nonEmailAction = intentEngine.parse("open mail and write an email to mail") as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("", nonEmailAction.recipient)
+
+        // 8. Dictate recipient with "to " prefix
+        val toPrefixedRecipient = intentEngine.parse(
+            "to vikki abi 2005 at gmail dot com",
+            listOf("dictate_email_recipient", "platform:EMAIL")
+        ) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("vikkiabi2005@gmail.com", toPrefixedRecipient.recipient)
+
+        // 9. Dictate invalid recipient like "mail" when prompted for email
+        val invalidRecipient = intentEngine.parse(
+            "mail",
+            listOf("dictate_email_recipient", "platform:EMAIL")
+        ) as com.spidey.assistant.actions.SendMessageAction
+        assertEquals("", invalidRecipient.recipient)
     }
 }

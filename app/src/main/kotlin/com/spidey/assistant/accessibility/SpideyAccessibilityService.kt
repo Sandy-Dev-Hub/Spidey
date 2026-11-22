@@ -98,36 +98,58 @@ class SpideyAccessibilityService : AccessibilityService() {
         return false
     }
 
-    suspend fun clickSendInGmail(timeoutMs: Long = 4500L): Boolean {
+    suspend fun clickSendInGmail(timeoutMs: Long = 6000L): Boolean {
         val startTime = System.currentTimeMillis()
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             for (root in getAllRoots()) {
                 val pkg = root.packageName?.toString()?.lowercase() ?: ""
                 if (isPackageBlocklisted(pkg)) continue
-                if (!pkg.contains("gmail") && !pkg.contains("google.android.gm")) continue
 
-                val sendNodes = root.findAccessibilityNodeInfosByViewId("com.google.android.gm:id/send")
-                for (node in sendNodes) {
-                    if (clickNodeOrTap(node)) {
-                        Log.i(TAG, "Clicked Gmail send button via id")
-                        return true
-                    }
-                }
-                val descNodes = root.findAccessibilityNodeInfosByText("Send")
-                for (node in descNodes) {
-                    val desc = node.contentDescription?.toString()
-                    val text = node.text?.toString()
-                    if (desc.equals("Send", ignoreCase = true) || text.equals("Send", ignoreCase = true)) {
+                // 1. Direct view ID search
+                try {
+                    val sendNodes = root.findAccessibilityNodeInfosByViewId("com.google.android.gm:id/send")
+                    for (node in sendNodes) {
                         if (clickNodeOrTap(node)) {
-                            Log.i(TAG, "Clicked Gmail send button via text/desc")
+                            Log.i(TAG, "Clicked Gmail send button via id")
                             return true
                         }
                     }
+                } catch (_: Exception) {}
+
+                // 2. Recursive search
+                if (findAndClickSendNode(root)) {
+                    return true
                 }
             }
             delay(200)
         }
         Log.w(TAG, "clickSendInGmail timed out after ${timeoutMs}ms")
+        return false
+    }
+
+    private fun findAndClickSendNode(node: AccessibilityNodeInfo): Boolean {
+        if (node.isPassword) return false
+        val viewId = node.viewIdResourceName ?: ""
+        val desc = node.contentDescription?.toString() ?: ""
+        val text = node.text?.toString() ?: ""
+
+        val isSendButton = viewId.endsWith(":id/send") ||
+                desc.equals("Send", ignoreCase = true) ||
+                text.equals("Send", ignoreCase = true)
+
+        if (isSendButton) {
+            if (clickNodeOrTap(node)) {
+                Log.i(TAG, "Clicked send node: id=$viewId, desc=$desc, text=$text")
+                return true
+            }
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (findAndClickSendNode(child)) {
+                return true
+            }
+        }
         return false
     }
 
@@ -145,7 +167,24 @@ class SpideyAccessibilityService : AccessibilityService() {
     private fun clickNodeOrTap(node: AccessibilityNodeInfo): Boolean {
         if (node.isPassword) return false
 
-        // 1. Physical gesture tap at node's screen center coordinates
+        // 1. Direct performAction ACTION_CLICK
+        if (node.isClickable && node.isEnabled && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            Log.d(TAG, "clickNodeOrTap: clicked node directly via ACTION_CLICK")
+            return true
+        }
+
+        // 2. Try parent performAction ACTION_CLICK
+        var parent = node.parent
+        while (parent != null) {
+            if (parent.isPassword) break
+            if (parent.isClickable && parent.isEnabled && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                Log.d(TAG, "clickNodeOrTap: clicked parent via ACTION_CLICK")
+                return true
+            }
+            parent = parent.parent
+        }
+
+        // 3. Fallback to physical gesture tap at node's screen center coordinates
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
         if (!bounds.isEmpty && bounds.width() > 0 && bounds.height() > 0) {
@@ -157,22 +196,11 @@ class SpideyAccessibilityService : AccessibilityService() {
                 .build()
             val dispatched = dispatchGesture(gesture, null, null)
             if (dispatched) {
+                Log.d(TAG, "clickNodeOrTap: dispatched gesture tap at (${bounds.centerX()}, ${bounds.centerY()})")
                 return true
             }
         }
 
-        // 2. Fallback to performAction ACTION_CLICK
-        if (node.isClickable && node.isEnabled && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            return true
-        }
-        var parent = node.parent
-        while (parent != null) {
-            if (parent.isPassword) return false
-            if (parent.isClickable && parent.isEnabled && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                return true
-            }
-            parent = parent.parent
-        }
         return false
     }
 
